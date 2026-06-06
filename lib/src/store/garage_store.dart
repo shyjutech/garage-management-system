@@ -1,0 +1,904 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:garage_management_system/src/models/garage_models.dart';
+import 'package:garage_management_system/src/repositories/garage_repository.dart';
+import 'package:garage_management_system/src/utils/garage_utils.dart';
+
+class GarageStore extends ChangeNotifier {
+  GarageStore.memory()
+      : _repo = null,
+        settings = GarageSettings.defaults();
+
+  GarageStore.firestore(GarageRepository repo)
+      : _repo = repo,
+        settings = GarageSettings.defaults();
+
+  final GarageRepository? _repo;
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
+
+  final customers = <Customer>[];
+  final vehicles = <Vehicle>[];
+  final stockItems = <StockItem>[];
+  final jobCards = <JobCard>[];
+  final estimates = <Estimate>[];
+  final invoices = <Invoice>[];
+  final stockTransactions = <StockTransaction>[];
+
+  GarageSettings settings;
+  UserRole activeRole = UserRole.admin;
+  bool loading = false;
+  String? lastError;
+
+  bool get useFirestore => _repo != null;
+
+  int _customerCounter = 1;
+  int _vehicleCounter = 1;
+  int _stockCounter = 1;
+
+  Future<void> initialize() async {
+    final repo = _repo;
+    if (repo == null) {
+      return;
+    }
+    loading = true;
+    notifyListeners();
+
+    try {
+      await repo.ensureSettings();
+      activeRole = await repo.loadUserRole();
+
+      _subscriptions
+        ..add(repo.watchSettings().listen((value) {
+          settings = value;
+          notifyListeners();
+        }))
+        ..add(repo.watchCustomers().listen((value) {
+          customers
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchVehicles().listen((value) {
+          vehicles
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchStockItems().listen((value) {
+          stockItems
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchJobCards().listen((value) {
+          jobCards
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchEstimates().listen((value) {
+          estimates
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchInvoices().listen((value) {
+          invoices
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchStockTransactions().listen((value) {
+          stockTransactions
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }));
+    } catch (error) {
+      lastError = error.toString();
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final subscription in _subscriptions) {
+      subscription.cancel();
+    }
+    super.dispose();
+  }
+
+  void seed() {
+    if (!useFirestore && customers.isEmpty) {
+      _seedDemoData();
+    }
+  }
+
+  void _seedDemoData() {
+    final customer = _addCustomerMemory(
+      name: 'KRISHNAN K',
+      mobile: '9961913343',
+      address: 'Karimbil Kumbalapalli',
+    );
+    final vehicle = _addVehicleMemory(
+      customerId: customer.id,
+      regNumber: 'KL60K3139',
+      brand: 'MARUTI',
+      model: 'DZIRE',
+      year: 2016,
+      lastKm: 84210,
+      notify: false,
+    );
+    _addStockItemMemory(
+      name: 'Timing Belt',
+      sku: 'TB-001',
+      price: 590,
+      currentStock: 12,
+      minStockAlert: 3,
+      notify: false,
+    );
+    _addStockItemMemory(
+      name: 'Tensioner',
+      sku: 'TN-002',
+      price: 715,
+      currentStock: 8,
+      minStockAlert: 2,
+      notify: false,
+    );
+    _addJobCardMemory(
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+      kmReading: 84500,
+      fuelLevel: 'Half',
+      customerComplaints: 'Timing belt noise on cold start',
+      complaintItems: const ['Timing belt replace', 'Check tensioner'],
+      observations: 'Belt worn, tensioner weak',
+      requestedWorks: 'Replace timing belt and tensioner',
+      otherNotes: '',
+      internalNotes: '',
+      mechanicName: 'Anoop',
+      notify: false,
+    );
+    _createEstimateMemory(
+      jobCardId: jobCards.first.id,
+      labourItems: const [
+        InvoiceLineDraft(description: 'TIMING BELT REPLACE', amount: 3000),
+        InvoiceLineDraft(description: 'ALTERNATOR R&R', amount: 1400),
+      ],
+      partsItems: [
+        PartLineDraft(stockItemId: stockItems[0].id, qty: 1),
+        PartLineDraft(stockItemId: stockItems[1].id, qty: 1),
+      ],
+      notes: 'Valid for 7 days',
+      notify: false,
+    );
+    updateJobCardStatus(jobCards.first.id, JobStatus.completed, notify: false);
+    notifyListeners();
+  }
+
+  Future<Customer?> addCustomer({
+    required String name,
+    required String mobile,
+    required String address,
+  }) async {
+    if (_repo == null) {
+      return _addCustomerMemory(
+        name: name,
+        mobile: mobile,
+        address: address,
+      );
+    }
+    try {
+      return await _repo.addCustomer(
+        name: name,
+        mobile: mobile,
+        address: address,
+      );
+    } catch (error) {
+      lastError = error.toString();
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Customer _addCustomerMemory({
+    required String name,
+    required String mobile,
+    required String address,
+  }) {
+    final customer = Customer(
+      id: 'C${_customerCounter++}',
+      name: name,
+      mobile: mobile,
+      address: address,
+    );
+    customers.insert(0, customer);
+    notifyListeners();
+    return customer;
+  }
+
+  Future<Vehicle?> addVehicle({
+    required String customerId,
+    required String regNumber,
+    required String brand,
+    required String model,
+    required int year,
+    required int lastKm,
+    bool notify = true,
+  }) async {
+    if (_repo == null) {
+      return _addVehicleMemory(
+        customerId: customerId,
+        regNumber: regNumber,
+        brand: brand,
+        model: model,
+        year: year,
+        lastKm: lastKm,
+        notify: notify,
+      );
+    }
+    try {
+      return await _repo.addVehicle(
+        customerId: customerId,
+        regNumber: regNumber,
+        brand: brand,
+        model: model,
+        year: year,
+        lastKm: lastKm,
+      );
+    } catch (error) {
+      lastError = error.toString();
+      if (notify) {
+        notifyListeners();
+      }
+      return null;
+    }
+  }
+
+  Vehicle _addVehicleMemory({
+    required String customerId,
+    required String regNumber,
+    required String brand,
+    required String model,
+    required int year,
+    required int lastKm,
+    bool notify = true,
+  }) {
+    final vehicle = Vehicle(
+      id: 'V${_vehicleCounter++}',
+      customerId: customerId,
+      regNumber: regNumber.toUpperCase(),
+      regNumberNormalized: normalizeRegNumber(regNumber),
+      brand: brand,
+      model: model,
+      year: year,
+      lastKmReading: lastKm,
+    );
+    vehicles.insert(0, vehicle);
+    if (notify) {
+      notifyListeners();
+    }
+    return vehicle;
+  }
+
+  Future<StockItem?> addStockItem({
+    required String name,
+    required String sku,
+    required double price,
+    required int currentStock,
+    required int minStockAlert,
+    bool notify = true,
+  }) async {
+    if (_repo == null) {
+      return _addStockItemMemory(
+        name: name,
+        sku: sku,
+        price: price,
+        currentStock: currentStock,
+        minStockAlert: minStockAlert,
+        notify: notify,
+      );
+    }
+    try {
+      return await _repo.addStockItem(
+        name: name,
+        sku: sku,
+        price: price,
+        currentStock: currentStock,
+        minStockAlert: minStockAlert,
+      );
+    } catch (error) {
+      lastError = error.toString();
+      if (notify) {
+        notifyListeners();
+      }
+      return null;
+    }
+  }
+
+  StockItem _addStockItemMemory({
+    required String name,
+    required String sku,
+    required double price,
+    required int currentStock,
+    required int minStockAlert,
+    bool notify = true,
+  }) {
+    final item = StockItem(
+      id: 'S${_stockCounter++}',
+      name: name,
+      sku: sku,
+      sellingPrice: price,
+      currentStock: currentStock,
+      minStockAlert: minStockAlert,
+    );
+    stockItems.insert(0, item);
+    if (notify) {
+      notifyListeners();
+    }
+    return item;
+  }
+
+  Future<JobCard?> addJobCard({
+    required String customerId,
+    required String vehicleId,
+    required int kmReading,
+    required String fuelLevel,
+    required String customerComplaints,
+    required List<String> complaintItems,
+    required String observations,
+    required String requestedWorks,
+    required String otherNotes,
+    required String internalNotes,
+    required String mechanicName,
+    DateTime? estimatedDelivery,
+    bool notify = true,
+  }) async {
+    if (_repo == null) {
+      return _addJobCardMemory(
+        customerId: customerId,
+        vehicleId: vehicleId,
+        kmReading: kmReading,
+        fuelLevel: fuelLevel,
+        customerComplaints: customerComplaints,
+        complaintItems: complaintItems,
+        observations: observations,
+        requestedWorks: requestedWorks,
+        otherNotes: otherNotes,
+        internalNotes: internalNotes,
+        mechanicName: mechanicName,
+        estimatedDelivery: estimatedDelivery,
+        notify: notify,
+      );
+    }
+    try {
+      return await _repo.addJobCard(
+        customerId: customerId,
+        vehicleId: vehicleId,
+        kmReading: kmReading,
+        fuelLevel: fuelLevel,
+        customerComplaints: customerComplaints,
+        complaintItems: complaintItems,
+        observations: observations,
+        requestedWorks: requestedWorks,
+        otherNotes: otherNotes,
+        internalNotes: internalNotes,
+        mechanicName: mechanicName,
+        estimatedDelivery: estimatedDelivery,
+      );
+    } catch (error) {
+      lastError = error.toString();
+      if (notify) {
+        notifyListeners();
+      }
+      return null;
+    }
+  }
+
+  JobCard _addJobCardMemory({
+    required String customerId,
+    required String vehicleId,
+    required int kmReading,
+    required String fuelLevel,
+    required String customerComplaints,
+    required List<String> complaintItems,
+    required String observations,
+    required String requestedWorks,
+    required String otherNotes,
+    required String internalNotes,
+    required String mechanicName,
+    DateTime? estimatedDelivery,
+    bool notify = true,
+  }) {
+    final card = JobCard(
+      id: 'J${settings.nextJobCardNumber}',
+      jobCardNumber: settings.nextJobCardNumber,
+      customerId: customerId,
+      vehicleId: vehicleId,
+      kmReading: kmReading,
+      fuelLevel: fuelLevel,
+      customerComplaints: customerComplaints,
+      complaintItems: complaintItems,
+      observations: observations,
+      requestedWorks: requestedWorks,
+      otherNotes: otherNotes,
+      internalNotes: internalNotes,
+      mechanicName: mechanicName,
+      estimatedDelivery: estimatedDelivery,
+      status: JobStatus.pending,
+      createdAt: DateTime.now(),
+    );
+    settings = settings.copyWith(nextJobCardNumber: settings.nextJobCardNumber + 1);
+    jobCards.insert(0, card);
+    if (notify) {
+      notifyListeners();
+    }
+    return card;
+  }
+
+  Future<void> updateJobCardStatus(
+    String id,
+    JobStatus status, {
+    bool notify = true,
+  }) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateJobCardStatus(id, status);
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+      }
+      return;
+    }
+
+    final index = jobCards.indexWhere((jobCard) => jobCard.id == id);
+    if (index == -1) {
+      return;
+    }
+    jobCards[index] = jobCards[index].copyWith(status: status);
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<bool> convertJobCardToInvoice({
+    required String jobCardId,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    required PaymentStatus paymentStatus,
+    required double amountPaid,
+  }) async {
+    if (_repo != null) {
+      return _repo.convertJobCardToInvoice(
+        jobCardId: jobCardId,
+        labourItems: labourItems,
+        partsItems: partsItems,
+        paymentStatus: paymentStatus,
+        amountPaid: amountPaid,
+        stockItems: stockItems,
+      );
+    }
+    return _convertJobCardToInvoiceMemory(
+      jobCardId: jobCardId,
+      labourItems: labourItems,
+      partsItems: partsItems,
+      paymentStatus: paymentStatus,
+      amountPaid: amountPaid,
+    );
+  }
+
+  bool _convertJobCardToInvoiceMemory({
+    required String jobCardId,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    required PaymentStatus paymentStatus,
+    required double amountPaid,
+  }) {
+    final jobCardIndex = jobCards.indexWhere((jobCard) => jobCard.id == jobCardId);
+    if (jobCardIndex == -1) {
+      return false;
+    }
+    for (final line in partsItems) {
+      final item = stockItems.where((stock) => stock.id == line.stockItemId).firstOrNull;
+      if (item == null || item.currentStock < line.qty) {
+        return false;
+      }
+    }
+    for (final line in partsItems) {
+      final stockIndex = stockItems.indexWhere((item) => item.id == line.stockItemId);
+      if (stockIndex == -1) {
+        return false;
+      }
+      final item = stockItems[stockIndex];
+      stockItems[stockIndex] = item.copyWith(currentStock: item.currentStock - line.qty);
+      stockTransactions.insert(
+        0,
+        StockTransaction(
+          id: 'ST${stockTransactions.length + 1}',
+          stockItemId: line.stockItemId,
+          type: StockTransactionType.out,
+          qty: line.qty,
+          referenceType: 'invoice',
+          referenceId: 'I${settings.nextInvoiceNumber}',
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    final jobCard = jobCards[jobCardIndex];
+    final labourTotal = labourItems.fold<double>(0, (sum, item) => sum + item.amount);
+    final partRecords = _partRecordsFromDrafts(partsItems);
+    final partsTotal = partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+    invoices.insert(
+      0,
+      Invoice(
+        id: 'I${settings.nextInvoiceNumber}',
+        invoiceNumber: settings.nextInvoiceNumber,
+        jobCardId: jobCard.id,
+        customerId: jobCard.customerId,
+        vehicleId: jobCard.vehicleId,
+        vehicleNumber: vehicleNumber(jobCard.vehicleId),
+        kmReading: jobCard.kmReading,
+        labourItems: labourItems,
+        partsItems: partRecords,
+        labourTotal: labourTotal,
+        partsTotal: partsTotal,
+        amountPaid: amountPaid,
+        paymentStatus: paymentStatus,
+        createdAt: DateTime.now(),
+      ),
+    );
+    settings = settings.copyWith(nextInvoiceNumber: settings.nextInvoiceNumber + 1);
+    jobCards[jobCardIndex] = jobCard.copyWith(status: JobStatus.delivered);
+    notifyListeners();
+    return true;
+  }
+
+  List<InvoicePartLine> _partRecordsFromDrafts(List<PartLineDraft> partsItems) {
+    return partsItems.map((line) {
+      final stock = stockItems.where((item) => item.id == line.stockItemId).firstOrNull;
+      if (stock == null) {
+        return const InvoicePartLine(
+          stockItemId: 'NA',
+          name: 'Unknown item',
+          qty: 0,
+          unitPrice: 0,
+        );
+      }
+      return InvoicePartLine(
+        stockItemId: stock.id,
+        name: stock.name,
+        qty: line.qty,
+        unitPrice: stock.sellingPrice,
+      );
+    }).toList();
+  }
+
+  Future<bool> createEstimate({
+    String? jobCardId,
+    String? customerId,
+    String? vehicleId,
+    int? kmReading,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    String notes = '',
+    bool notify = true,
+  }) async {
+    if (_repo != null) {
+      try {
+        return await _repo.createEstimate(
+          jobCardId: jobCardId,
+          customerId: customerId,
+          vehicleId: vehicleId,
+          kmReading: kmReading,
+          labourItems: labourItems,
+          partsItems: partsItems,
+          notes: notes,
+          stockItems: stockItems,
+          vehicleNumberFor: vehicleNumber,
+        );
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+    return _createEstimateMemory(
+      jobCardId: jobCardId,
+      customerId: customerId,
+      vehicleId: vehicleId,
+      kmReading: kmReading,
+      labourItems: labourItems,
+      partsItems: partsItems,
+      notes: notes,
+      notify: notify,
+    );
+  }
+
+  bool _createEstimateMemory({
+    String? jobCardId,
+    String? customerId,
+    String? vehicleId,
+    int? kmReading,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    String notes = '',
+    bool notify = true,
+  }) {
+    if (labourItems.isEmpty && partsItems.isEmpty) {
+      return false;
+    }
+
+    String resolvedCustomerId;
+    String resolvedVehicleId;
+    int resolvedKm;
+    String? linkedJobCardId;
+
+    if (jobCardId != null) {
+      final jobCard = jobCards.where((item) => item.id == jobCardId).firstOrNull;
+      if (jobCard == null) {
+        return false;
+      }
+      resolvedCustomerId = jobCard.customerId;
+      resolvedVehicleId = jobCard.vehicleId;
+      resolvedKm = jobCard.kmReading;
+      linkedJobCardId = jobCard.id;
+    } else if (customerId != null && vehicleId != null) {
+      resolvedCustomerId = customerId;
+      resolvedVehicleId = vehicleId;
+      resolvedKm = kmReading ?? 0;
+    } else {
+      return false;
+    }
+
+    final partRecords = _partRecordsFromDrafts(partsItems);
+    final labourTotal = labourItems.fold<double>(0, (sum, item) => sum + item.amount);
+    final partsTotal = partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+
+    estimates.insert(
+      0,
+      Estimate(
+        id: 'E${settings.nextEstimateNumber}',
+        estimateNumber: settings.nextEstimateNumber,
+        jobCardId: linkedJobCardId,
+        customerId: resolvedCustomerId,
+        vehicleId: resolvedVehicleId,
+        vehicleNumber: vehicleNumber(resolvedVehicleId),
+        kmReading: resolvedKm,
+        labourItems: List.of(labourItems),
+        partsItems: partRecords,
+        labourTotal: labourTotal,
+        partsTotal: partsTotal,
+        notes: notes,
+        status: EstimateStatus.sent,
+        createdAt: DateTime.now(),
+      ),
+    );
+    settings = settings.copyWith(nextEstimateNumber: settings.nextEstimateNumber + 1);
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Future<void> updateEstimateStatus(
+    String id,
+    EstimateStatus status, {
+    bool notify = true,
+  }) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateEstimateStatus(id, status);
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+      }
+      return;
+    }
+
+    final index = estimates.indexWhere((estimate) => estimate.id == id);
+    if (index == -1 || estimates[index].status == EstimateStatus.converted) {
+      return;
+    }
+    estimates[index] = estimates[index].copyWith(status: status);
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<bool> convertEstimateToInvoice(String estimateId) async {
+    if (_repo != null) {
+      return _repo.convertEstimateToInvoice(estimateId);
+    }
+    return _convertEstimateToInvoiceMemory(estimateId);
+  }
+
+  bool _convertEstimateToInvoiceMemory(String estimateId) {
+    final estimateIndex = estimates.indexWhere((estimate) => estimate.id == estimateId);
+    if (estimateIndex == -1) {
+      return false;
+    }
+    final estimate = estimates[estimateIndex];
+    if (estimate.status == EstimateStatus.converted) {
+      return false;
+    }
+
+    final partDrafts = estimate.partsItems
+        .map((line) => PartLineDraft(stockItemId: line.stockItemId, qty: line.qty))
+        .toList();
+
+    for (final line in partDrafts) {
+      final item = stockItems.where((stock) => stock.id == line.stockItemId).firstOrNull;
+      if (item == null || item.currentStock < line.qty) {
+        return false;
+      }
+    }
+
+    for (final line in partDrafts) {
+      final stockIndex = stockItems.indexWhere((item) => item.id == line.stockItemId);
+      if (stockIndex == -1) {
+        return false;
+      }
+      final item = stockItems[stockIndex];
+      stockItems[stockIndex] = item.copyWith(currentStock: item.currentStock - line.qty);
+      stockTransactions.insert(
+        0,
+        StockTransaction(
+          id: 'ST${stockTransactions.length + 1}',
+          stockItemId: line.stockItemId,
+          type: StockTransactionType.out,
+          qty: line.qty,
+          referenceType: 'invoice',
+          referenceId: 'I${settings.nextInvoiceNumber}',
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+
+    invoices.insert(
+      0,
+      Invoice(
+        id: 'I${settings.nextInvoiceNumber}',
+        invoiceNumber: settings.nextInvoiceNumber,
+        jobCardId: estimate.jobCardId,
+        customerId: estimate.customerId,
+        vehicleId: estimate.vehicleId,
+        vehicleNumber: estimate.vehicleNumber,
+        kmReading: estimate.kmReading,
+        labourItems: estimate.labourItems,
+        partsItems: estimate.partsItems,
+        labourTotal: estimate.labourTotal,
+        partsTotal: estimate.partsTotal,
+        amountPaid: 0,
+        paymentStatus: PaymentStatus.unpaid,
+        createdAt: DateTime.now(),
+      ),
+    );
+    settings = settings.copyWith(nextInvoiceNumber: settings.nextInvoiceNumber + 1);
+    estimates[estimateIndex] = estimate.copyWith(status: EstimateStatus.converted);
+
+    if (estimate.jobCardId != null) {
+      updateJobCardStatus(estimate.jobCardId!, JobStatus.delivered, notify: false);
+    }
+
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> updateSettings({
+    required String businessName,
+    required String tagline,
+    required String address,
+    required String phone,
+    required String invoicePrefix,
+    required int nextInvoiceNumber,
+    required int nextJobCardNumber,
+    required int nextEstimateNumber,
+  }) async {
+    final updated = settings.copyWith(
+      businessName: businessName,
+      tagline: tagline,
+      address: address,
+      phone: phone,
+      invoicePrefix: invoicePrefix,
+      nextInvoiceNumber: nextInvoiceNumber,
+      nextJobCardNumber: nextJobCardNumber,
+      nextEstimateNumber: nextEstimateNumber,
+    );
+
+    if (_repo != null) {
+      try {
+        await _repo.updateSettings(updated);
+      } catch (error) {
+        lastError = error.toString();
+        notifyListeners();
+      }
+      return;
+    }
+
+    settings = updated;
+    notifyListeners();
+  }
+
+  void setActiveRole(UserRole role) {
+    activeRole = role;
+    notifyListeners();
+  }
+
+  String roleDescription(UserRole role) {
+    return switch (role) {
+      UserRole.admin => 'Full access to all modules and settings.',
+      UserRole.billing =>
+        'Can manage party, vehicles, estimates, invoices, and payments.',
+      UserRole.mechanic => 'Can update job card status and notes.',
+      UserRole.accountant => 'Can view dashboard, invoices, and totals.',
+    };
+  }
+
+  List<Vehicle> searchVehicles(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      return vehicles;
+    }
+    final normalized = normalizeRegNumber(trimmed);
+    final lower = trimmed.toLowerCase();
+    return vehicles.where((vehicle) {
+      final customer =
+          customers.where((item) => item.id == vehicle.customerId).firstOrNull;
+      if (customer == null) {
+        return false;
+      }
+      return vehicle.regNumberNormalized.contains(normalized) ||
+          customer.mobile.contains(trimmed) ||
+          customer.name.toLowerCase().contains(lower);
+    }).toList();
+  }
+
+  List<Invoice> invoicesByVehicle(String vehicleId) {
+    return invoices.where((invoice) => invoice.vehicleId == vehicleId).toList();
+  }
+
+  List<Estimate> estimatesByVehicle(String vehicleId) {
+    return estimates.where((estimate) => estimate.vehicleId == vehicleId).toList();
+  }
+
+  int get openEstimates => estimates
+      .where(
+        (estimate) =>
+            estimate.status != EstimateStatus.converted &&
+            estimate.status != EstimateStatus.rejected,
+      )
+      .length;
+
+  String customerName(String id) {
+    return customers.where((item) => item.id == id).firstOrNull?.name ??
+        'Unknown customer';
+  }
+
+  String vehicleNumber(String id) {
+    return vehicles.where((item) => item.id == id).firstOrNull?.regNumber ??
+        'Unknown vehicle';
+  }
+
+  String stockItemName(String id) {
+    return stockItems.where((item) => item.id == id).firstOrNull?.name ??
+        'Unknown item';
+  }
+
+  int get todayJobCards =>
+      jobCards.where((item) => sameDay(item.createdAt, DateTime.now())).length;
+
+  int get activeJobCards =>
+      jobCards.where((item) => item.status != JobStatus.delivered).length;
+
+  List<StockItem> get lowStockItems =>
+      stockItems.where((item) => item.currentStock <= item.minStockAlert).toList();
+}
