@@ -1,6 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
+
+void showAppSnackBar(
+  BuildContext context,
+  String message, {
+  Color backgroundColor = AppColors.warning,
+}) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      backgroundColor: backgroundColor,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+  );
+}
 
 class PageHeader extends StatelessWidget {
   const PageHeader({
@@ -235,23 +251,160 @@ class AppTextField extends StatelessWidget {
     required this.label,
     this.width = 200,
     this.icon,
+    this.keyboardType,
+    this.inputFormatters,
+    this.maxLength,
+    this.textCapitalization = TextCapitalization.none,
+    this.expand = false,
+    this.hint,
   });
 
   final TextEditingController controller;
   final String label;
   final double width;
   final IconData? icon;
+  final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+  final int? maxLength;
+  final TextCapitalization textCapitalization;
+  final bool expand;
+  final String? hint;
 
   @override
   Widget build(BuildContext context) {
+    final useFullWidth = expand || AppBreakpoints.isMobile(context);
     return SizedBox(
-      width: AppBreakpoints.fieldWidth(context, width),
+      width: useFullWidth ? double.infinity : AppBreakpoints.fieldWidth(context, width),
       child: TextField(
         controller: controller,
+        keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
+        maxLength: maxLength,
+        textCapitalization: textCapitalization,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: icon != null ? Icon(icon, size: 20, color: AppColors.textMuted) : null,
+          hintText: hint,
+          prefixIcon:
+              icon != null ? Icon(icon, size: 20, color: AppColors.textMuted) : null,
+          counterText: maxLength != null ? '' : null,
         ),
+      ),
+    );
+  }
+}
+
+class AppDropdownField<T> extends StatelessWidget {
+  const AppDropdownField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.icon,
+    this.hint,
+  });
+
+  final String label;
+  final T? value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final IconData? icon;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<T>(
+      value: value,
+      items: items,
+      onChanged: onChanged,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon:
+            icon != null ? Icon(icon, size: 20, color: AppColors.textMuted) : null,
+      ),
+    );
+  }
+}
+
+class AppFormRow extends StatelessWidget {
+  const AppFormRow({
+    super.key,
+    required this.children,
+    this.spacing = 12,
+    this.breakpoint = 640,
+  });
+
+  final List<Widget> children;
+  final double spacing;
+  final double breakpoint;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < breakpoint) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) SizedBox(height: spacing),
+                children[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) SizedBox(width: spacing),
+              Expanded(child: children[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class AppFormActions extends StatelessWidget {
+  const AppFormActions({
+    super.key,
+    required this.primary,
+    this.secondary,
+  });
+
+  final Widget primary;
+  final Widget? secondary;
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = AppBreakpoints.isMobile(context);
+    final actions = <Widget>[
+      if (secondary != null) ...[
+        secondary!,
+        const SizedBox(width: 12),
+      ],
+      primary,
+    ];
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: actions,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: actions,
       ),
     );
   }

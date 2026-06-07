@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
@@ -21,6 +23,7 @@ enum AppSection {
   jobCards,
   estimates,
   invoices,
+  help,
   settings,
 }
 
@@ -35,6 +38,7 @@ class _HomeShellState extends State<HomeShell> {
   AppSection section = AppSection.dashboard;
   final globalSearchController = TextEditingController();
   Vehicle? highlightedVehicle;
+  bool _sidebarVisible = true;
 
   static const navItems = <(AppSection, IconData, String)>[
     (AppSection.dashboard, Icons.dashboard_rounded, 'Dashboard'),
@@ -44,6 +48,7 @@ class _HomeShellState extends State<HomeShell> {
     (AppSection.jobCards, Icons.build_circle_rounded, 'Job Cards'),
     (AppSection.estimates, Icons.request_quote_rounded, 'Estimates'),
     (AppSection.invoices, Icons.receipt_long_rounded, 'Invoices'),
+    (AppSection.help, Icons.help_outline_rounded, 'Help'),
     (AppSection.settings, Icons.settings_rounded, 'Settings'),
   ];
 
@@ -61,70 +66,102 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  Widget _buildSidebarContent(GarageStore store) {
+  void _closeDrawer() {
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Widget _buildSidebarContent(
+    GarageStore store, {
+    required bool isDrawer,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
-          child: Column(
+          padding: EdgeInsets.fromLTRB(20, isDrawer ? 12 : 28, 12, 16),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.directions_car_filled_rounded,
-                  color: Colors.white,
-                  size: 28,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.directions_car_filled_rounded,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'SARATHI',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    Text(
+                      'AUTOMOBILES',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Garage Management',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 14),
-              const Text(
-                'SARATHI',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              Text(
-                'AUTOMOBILES',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Garage Management',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 12,
+              IconButton(
+                tooltip: isDrawer ? 'Close menu' : 'Hide menu',
+                onPressed: isDrawer
+                    ? _closeDrawer
+                    : () => setState(() => _sidebarVisible = false),
+                icon: Icon(
+                  isDrawer ? Icons.close_rounded : Icons.chevron_left_rounded,
+                  color: Colors.white.withValues(alpha: 0.9),
                 ),
               ),
             ],
           ),
         ),
         const Divider(color: Colors.white24, height: 1, indent: 16, endIndent: 16),
-        const SizedBox(height: 8),
-        ...navItems.map(
-          (item) => SidebarNavItem(
-            icon: item.$2,
-            label: item.$3,
-            selected: section == item.$1,
-            onTap: () => _selectSection(item.$1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: navItems
+                .map(
+                  (item) => SidebarNavItem(
+                    icon: item.$2,
+                    label: item.$3,
+                    selected: section == item.$1,
+                    onTap: () => _selectSection(item.$1),
+                  ),
+                )
+                .toList(),
           ),
         ),
-        const Spacer(),
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Text(
             store.settings.businessName,
             style: TextStyle(
@@ -192,6 +229,7 @@ class _HomeShellState extends State<HomeShell> {
       AppSection.jobCards: const JobCardsPage(),
       AppSection.estimates: const EstimatesPage(),
       AppSection.invoices: const InvoicesPage(),
+      AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
     final searchResults =
@@ -212,7 +250,9 @@ class _HomeShellState extends State<HomeShell> {
                 colors: [AppColors.sidebar, AppColors.primaryDark],
               ),
             ),
-            child: SafeArea(child: _buildSidebarContent(store)),
+            child: SafeArea(
+              child: _buildSidebarContent(store, isDrawer: true),
+            ),
           ),
         ),
         appBar: AppBar(
@@ -250,19 +290,22 @@ class _HomeShellState extends State<HomeShell> {
       backgroundColor: AppColors.background,
       body: Row(
         children: [
-          SizedBox(
-            width: 240,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [AppColors.sidebar, AppColors.primaryDark],
+          if (_sidebarVisible)
+            SizedBox(
+              width: 240,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [AppColors.sidebar, AppColors.primaryDark],
+                  ),
+                ),
+                child: SafeArea(
+                  child: _buildSidebarContent(store, isDrawer: false),
                 ),
               ),
-              child: SafeArea(child: _buildSidebarContent(store)),
             ),
-          ),
           Expanded(
             child: Column(
               children: [
@@ -274,6 +317,12 @@ class _HomeShellState extends State<HomeShell> {
                   ),
                   child: Row(
                     children: [
+                      if (!_sidebarVisible)
+                        IconButton(
+                          tooltip: 'Show menu',
+                          onPressed: () => setState(() => _sidebarVisible = true),
+                          icon: const Icon(Icons.menu_rounded),
+                        ),
                       Expanded(
                         child: Text(
                           currentTitle,
@@ -455,6 +504,78 @@ class _PartiesPageState extends State<PartiesPage> {
   final km = TextEditingController();
 
   @override
+  void dispose() {
+    customerName.dispose();
+    mobile.dispose();
+    address.dispose();
+    regNumber.dispose();
+    brand.dispose();
+    model.dispose();
+    year.dispose();
+    km.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addParty(GarageStore store) async {
+    final nameError = FormValidators.requiredText(customerName.text, 'Name');
+    final mobileError = FormValidators.mobile(mobile.text);
+    final addressError = FormValidators.requiredText(address.text, 'Address');
+    final error = nameError ?? mobileError ?? addressError;
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    await store.addCustomer(
+      name: customerName.text.trim(),
+      mobile: normalizeMobile(mobile.text),
+      address: address.text.trim(),
+    );
+    customerName.clear();
+    mobile.clear();
+    address.clear();
+    if (context.mounted) {
+      showAppSnackBar(
+        context,
+        'Party added',
+        backgroundColor: AppColors.success,
+      );
+    }
+  }
+
+  Future<void> _addVehicle(GarageStore store) async {
+    final regError = FormValidators.vehicleNumber(regNumber.text);
+    final brandError = FormValidators.requiredText(brand.text, 'Brand');
+    final modelError = FormValidators.requiredText(model.text, 'Model');
+    final yearError = FormValidators.vehicleYear(year.text);
+    final kmError = FormValidators.positiveKm(km.text);
+    final error = regError ?? brandError ?? modelError ?? yearError ?? kmError;
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    await store.addVehicle(
+      customerId: selectedCustomerId!,
+      regNumber: regNumber.text.trim(),
+      brand: brand.text.trim(),
+      model: model.text.trim(),
+      year: int.parse(year.text.trim()),
+      lastKm: int.parse(km.text.trim()),
+    );
+    regNumber.clear();
+    brand.clear();
+    model.clear();
+    year.clear();
+    km.clear();
+    if (context.mounted) {
+      showAppSnackBar(
+        context,
+        'Vehicle added',
+        backgroundColor: AppColors.success,
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
     if (store.customers.isEmpty) {
@@ -475,88 +596,153 @@ class _PartiesPageState extends State<PartiesPage> {
           SectionCard(
             title: 'Add Party',
             icon: Icons.person_add_rounded,
-            child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.end,
-                children: [
-                  AppTextField(controller: customerName, label: 'Name', icon: Icons.person),
-                  AppTextField(controller: mobile, label: 'Mobile', icon: Icons.phone),
-                  AppTextField(controller: address, label: 'Address', width: 260, icon: Icons.location_on_outlined),
-                    FilledButton(
-                    onPressed: () async {
-                      if (customerName.text.trim().isEmpty ||
-                          mobile.text.trim().isEmpty) {
-                        return;
-                      }
-                      await store.addCustomer(
-                        name: customerName.text.trim(),
-                        mobile: mobile.text.trim(),
-                        address: address.text.trim(),
-                      );
-                      customerName.clear();
-                      mobile.clear();
-                      address.clear();
-                    },
-                    child: const Text('Add Party'),
+            subtitle: 'Customer name, mobile, and address',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AppFormRow(
+                  children: [
+                    AppTextField(
+                      controller: customerName,
+                      label: 'Name *',
+                      icon: Icons.person,
+                      expand: true,
+                    ),
+                    AppTextField(
+                      controller: mobile,
+                      label: 'Mobile *',
+                      icon: Icons.phone,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      expand: true,
+                      hint: '10-digit number',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: address,
+                  label: 'Address *',
+                  icon: Icons.location_on_outlined,
+                  expand: true,
+                ),
+                AppFormActions(
+                  primary: FilledButton.icon(
+                    onPressed: () => _addParty(store),
+                    icon: const Icon(Icons.person_add_rounded, size: 20),
+                    label: const Text('Add Party'),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           SectionCard(
             title: 'Add Vehicle',
             icon: Icons.directions_car_rounded,
-            child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.end,
-                children: [
-                  DropdownButton<String>(
-                    value: selectedCustomerId,
-                    hint: const Text('Select Party'),
-                    items: store.customers
-                        .map(
-                          (customer) => DropdownMenuItem(
-                            value: customer.id,
-                            child: Text(customer.name),
+            subtitle: 'Link a vehicle to an existing party',
+            child: store.customers.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.info_outline, color: AppColors.textMuted),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Add a party first, then you can register their vehicle here.',
+                            style: TextStyle(color: AppColors.textMuted),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() {
-                      selectedCustomerId = value;
-                    }),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AppDropdownField<String>(
+                        label: 'Party *',
+                        icon: Icons.person_outline,
+                        value: selectedCustomerId,
+                        hint: 'Select party',
+                        items: store.customers
+                            .map(
+                              (customer) => DropdownMenuItem(
+                                value: customer.id,
+                                child: Text(
+                                  '${customer.name} · ${customer.mobile}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) => setState(() {
+                          selectedCustomerId = value;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      AppFormRow(
+                        children: [
+                          AppTextField(
+                            controller: regNumber,
+                            label: 'Vehicle Number *',
+                            expand: true,
+                            textCapitalization: TextCapitalization.characters,
+                            hint: 'e.g. KL60K3139',
+                          ),
+                          AppTextField(
+                            controller: brand,
+                            label: 'Brand *',
+                            expand: true,
+                            hint: 'e.g. MARUTI',
+                          ),
+                          AppTextField(
+                            controller: model,
+                            label: 'Model *',
+                            expand: true,
+                            hint: 'e.g. DZIRE',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      AppFormRow(
+                        children: [
+                          AppTextField(
+                            controller: year,
+                            label: 'Year *',
+                            expand: true,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            hint: 'e.g. 2016',
+                          ),
+                          AppTextField(
+                            controller: km,
+                            label: 'KM Reading *',
+                            expand: true,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            hint: 'Current odometer',
+                          ),
+                        ],
+                      ),
+                      AppFormActions(
+                        primary: FilledButton.icon(
+                          onPressed: selectedCustomerId == null
+                              ? null
+                              : () => _addVehicle(store),
+                          icon: const Icon(Icons.directions_car_rounded, size: 20),
+                          label: const Text('Add Vehicle'),
+                        ),
+                      ),
+                    ],
                   ),
-                  AppTextField(controller: regNumber, label: 'Vehicle Number'),
-                  AppTextField(controller: brand, label: 'Brand'),
-                  AppTextField(controller: model, label: 'Model'),
-                  AppTextField(controller: year, label: 'Year'),
-                  AppTextField(controller: km, label: 'KM'),
-                  FilledButton(
-                    onPressed: selectedCustomerId == null
-                        ? null
-                        : () async {
-                            if (regNumber.text.trim().isEmpty) {
-                              return;
-                            }
-                            await store.addVehicle(
-                              customerId: selectedCustomerId!,
-                              regNumber: regNumber.text.trim(),
-                              brand: brand.text.trim(),
-                              model: model.text.trim(),
-                              year: int.tryParse(year.text.trim()) ?? 0,
-                              lastKm: int.tryParse(km.text.trim()) ?? 0,
-                            );
-                            regNumber.clear();
-                            brand.clear();
-                            model.clear();
-                            year.clear();
-                            km.clear();
-                          },
-                    child: const Text('Add Vehicle'),
-                  ),
-                ],
-              ),
           ),
           const SizedBox(height: 16),
           SectionCard(
@@ -944,7 +1130,7 @@ class _JobCardsPageState extends State<JobCardsPage> {
                         vehicleId = value;
                       }),
                     ),
-                    AppTextField(controller: km, label: 'KM Reading', width: 140),
+                    AppTextField(controller: km, label: 'KM Reading *', width: 140, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
                     DropdownButton<String>(
                       value: fuelLevel,
                       items: const [
@@ -959,7 +1145,7 @@ class _JobCardsPageState extends State<JobCardsPage> {
                         setState(() => fuelLevel = value);
                       },
                     ),
-                    AppTextField(controller: mechanic, label: 'Mechanic', width: 160),
+                    AppTextField(controller: mechanic, label: 'Mechanic *', width: 160),
                   ],
                 ),
                 const SizedBox(height: 20),
@@ -1098,25 +1284,25 @@ class _JobCardsPageState extends State<JobCardsPage> {
                   onPressed: (customerId == null || vehicleId == null)
                       ? null
                       : () async {
+                          final kmError = FormValidators.positiveKm(km.text);
+                          final mechanicError =
+                              FormValidators.requiredText(mechanic.text, 'Mechanic');
+                          final error = kmError ?? mechanicError;
+                          if (error != null) {
+                            showAppSnackBar(context, error);
+                            return;
+                          }
                           if (!_hasAnyComplaintContent()) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text(
-                                  'Add at least one complaint or work description',
-                                ),
-                                backgroundColor: AppColors.warning,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
+                            showAppSnackBar(
+                              context,
+                              'Add at least one complaint or work description',
                             );
                             return;
                           }
-                          await store.addJobCard(
+                          final card = await store.addJobCard(
                             customerId: customerId!,
                             vehicleId: vehicleId!,
-                            kmReading: int.tryParse(km.text.trim()) ?? 0,
+                            kmReading: int.parse(km.text.trim()),
                             fuelLevel: fuelLevel,
                             customerComplaints: _buildComplaintsText(),
                             complaintItems: List.of(complaintItems),
@@ -1127,7 +1313,20 @@ class _JobCardsPageState extends State<JobCardsPage> {
                             mechanicName: mechanic.text.trim(),
                             estimatedDelivery: _parseDeliveryDateTime(),
                           );
+                          if (!context.mounted) return;
+                          if (card == null) {
+                            showAppSnackBar(
+                              context,
+                              store.lastError ?? 'Could not create job card',
+                            );
+                            return;
+                          }
                           _clearForm();
+                          showAppSnackBar(
+                            context,
+                            'Job card #${card.jobCardNumber} created',
+                            backgroundColor: AppColors.success,
+                          );
                         },
                   icon: const Icon(Icons.save_rounded, size: 20),
                   label: const Text('Create Job Card'),
@@ -1942,43 +2141,81 @@ class _EstimatesPageState extends State<EstimatesPage> {
           SectionCard(
             title: 'Saved Estimates',
             icon: Icons.list_alt_rounded,
-            child: Column(
+            subtitle:
+                'Use Convert to Invoice to bill the customer. Status becomes Converted automatically.',
+            child: store.estimates.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No estimates yet. Create one above.',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
+                  )
+                : Column(
               children: store.estimates.map((estimate) {
-                final canConvert =
-                    estimate.status != EstimateStatus.converted;
+                final isConverted = estimate.status == EstimateStatus.converted;
+                final isRejected = estimate.status == EstimateStatus.rejected;
+                final canConvert = !isConverted && !isRejected;
                 return DataListTile(
                   title:
                       '#${estimate.estimateNumber} · ${estimate.vehicleNumber}',
                   subtitle:
                       '${estimate.status.label} · ${DateFormat('dd-MM-yyyy').format(estimate.createdAt)}',
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DropdownButton<EstimateStatus>(
-                        value: estimate.status,
-                        items: EstimateStatus.values
-                            .map(
-                              (status) => DropdownMenuItem(
-                                value: status,
-                                child: Text(status.label),
-                              ),
+                  trailing: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 520;
+                      final statusControl = isConverted
+                          ? Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              children: [
+                                Chip(
+                                  label: Text(estimate.status.label),
+                                  backgroundColor:
+                                      AppColors.success.withValues(alpha: 0.12),
+                                ),
+                                TextButton(
+                                  onPressed: () async {
+                                    await store.reopenEstimate(estimate.id);
+                                    if (context.mounted) {
+                                      showAppSnackBar(
+                                        context,
+                                        'Estimate reopened — use Convert to Invoice to bill',
+                                        backgroundColor: AppColors.success,
+                                      );
+                                    }
+                                  },
+                                  child: const Text('Reopen'),
+                                ),
+                              ],
                             )
-                            .toList(),
-                        onChanged: estimate.status == EstimateStatus.converted
-                            ? null
-                            : (value) {
+                          : DropdownButton<EstimateStatus>(
+                              value: estimate.status,
+                              items: EstimateStatus.values
+                                  .where(
+                                    (status) =>
+                                        status != EstimateStatus.converted,
+                                  )
+                                  .map(
+                                    (status) => DropdownMenuItem(
+                                      value: status,
+                                      child: Text(status.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (value) {
                                 if (value == null) return;
                                 store.updateEstimateStatus(estimate.id, value);
                               },
-                      ),
-                      Text(
+                            );
+                      final amount = Text(
                         formatAmount(estimate.grandTotal),
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           color: AppColors.primary,
                         ),
-                      ),
-                      IconButton(
+                      );
+                      final pdfButton = IconButton(
                         tooltip: 'Print Estimate',
                         onPressed: () async {
                           await Printing.layoutPdf(
@@ -1993,46 +2230,68 @@ class _EstimatesPageState extends State<EstimatesPage> {
                           Icons.picture_as_pdf_rounded,
                           color: AppColors.primary,
                         ),
-                      ),
-                      if (canConvert)
-                        IconButton(
-                          tooltip: 'Convert to Invoice',
-                          onPressed: () async {
-                            final ok = await store.convertEstimateToInvoice(
-                              estimate.id,
-                            );
-                            if (!ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text(
-                                    'Could not convert — check stock or status',
-                                  ),
-                                  backgroundColor: AppColors.warning,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text('Converted to invoice'),
-                                backgroundColor: AppColors.success,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(
-                            Icons.receipt_long_rounded,
-                            color: AppColors.primaryDark,
-                          ),
-                        ),
-                    ],
+                      );
+                      final convertButton = canConvert
+                          ? FilledButton.tonalIcon(
+                              onPressed: () async {
+                                final ok = await store.convertEstimateToInvoice(
+                                  estimate.id,
+                                );
+                                if (!context.mounted) return;
+                                if (!ok) {
+                                  showAppSnackBar(
+                                    context,
+                                    store.lastError ??
+                                        'Could not convert — check stock availability or Cloud Functions',
+                                  );
+                                  return;
+                                }
+                                showAppSnackBar(
+                                  context,
+                                  'Invoice created — check Invoices tab',
+                                  backgroundColor: AppColors.success,
+                                );
+                              },
+                              icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                              label: Text(compact ? 'Bill' : 'Convert to Invoice'),
+                            )
+                          : null;
+
+                      if (compact) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                statusControl,
+                                const SizedBox(width: 8),
+                                amount,
+                                pdfButton,
+                              ],
+                            ),
+                            if (convertButton != null) ...[
+                              const SizedBox(height: 8),
+                              convertButton,
+                            ],
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          statusControl,
+                          const SizedBox(width: 8),
+                          amount,
+                          pdfButton,
+                          if (convertButton != null) ...[
+                            const SizedBox(width: 8),
+                            convertButton,
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 );
               }).toList(),

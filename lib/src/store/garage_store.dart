@@ -687,11 +687,38 @@ class GarageStore extends ChangeNotifier {
     return true;
   }
 
+  Future<void> reopenEstimate(String id, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.reopenEstimate(id);
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+      }
+      return;
+    }
+
+    final index = estimates.indexWhere((estimate) => estimate.id == id);
+    if (index == -1) {
+      return;
+    }
+    estimates[index] = estimates[index].copyWith(status: EstimateStatus.approved);
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
   Future<void> updateEstimateStatus(
     String id,
     EstimateStatus status, {
     bool notify = true,
   }) async {
+    if (status == EstimateStatus.converted) {
+      return;
+    }
+
     if (_repo != null) {
       try {
         await _repo.updateEstimateStatus(id, status);

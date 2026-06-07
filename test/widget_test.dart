@@ -7,8 +7,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:garage_management_system/src/app_root.dart';
+import 'package:garage_management_system/src/app.dart';
+import 'package:garage_management_system/src/store/garage_store.dart';
+import 'package:garage_management_system/src/theme/app_theme.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   testWidgets('app renders main modules', (WidgetTester tester) async {
@@ -18,7 +20,13 @@ void main() {
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(size: Size(1280, 800)),
-        child: const GarageManagementApp(),
+        child: ChangeNotifierProvider(
+          create: (_) => GarageStore.memory()..seed(),
+          child: MaterialApp(
+            theme: AppTheme.light,
+            home: const HomeShell(),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();

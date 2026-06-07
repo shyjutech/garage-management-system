@@ -157,31 +157,43 @@ class GarageRepository {
     required String mechanicName,
     DateTime? estimatedDelivery,
   }) async {
-    final callable = _functions.httpsCallable('getNextJobCardNumber');
-    final response = await callable.call<Map<String, dynamic>>();
-    final jobCardNumber = (response.data['jobCardNumber'] as num).toInt();
+    final settingsRef = _settingsRef;
+    final jobCardRef = _db.collection('jobcards').doc();
 
-    final ref = _db.collection('jobcards').doc();
-    final card = JobCard(
-      id: ref.id,
-      jobCardNumber: jobCardNumber,
-      customerId: customerId,
-      vehicleId: vehicleId,
-      kmReading: kmReading,
-      fuelLevel: fuelLevel,
-      customerComplaints: customerComplaints,
-      complaintItems: complaintItems,
-      observations: observations,
-      requestedWorks: requestedWorks,
-      otherNotes: otherNotes,
-      internalNotes: internalNotes,
-      mechanicName: mechanicName,
-      estimatedDelivery: estimatedDelivery,
-      status: JobStatus.pending,
-      createdAt: DateTime.now(),
-    );
-    await ref.set(card.toMap(jobCardNumber: jobCardNumber));
-    return card;
+    return _db.runTransaction((transaction) async {
+      final settingsSnap = await transaction.get(settingsRef);
+      final jobCardNumber = settingsSnap.exists
+          ? (settingsSnap.data()?['nextJobCardNumber'] as num?)?.toInt() ?? 900
+          : 900;
+
+      final card = JobCard(
+        id: jobCardRef.id,
+        jobCardNumber: jobCardNumber,
+        customerId: customerId,
+        vehicleId: vehicleId,
+        kmReading: kmReading,
+        fuelLevel: fuelLevel,
+        customerComplaints: customerComplaints,
+        complaintItems: complaintItems,
+        observations: observations,
+        requestedWorks: requestedWorks,
+        otherNotes: otherNotes,
+        internalNotes: internalNotes,
+        mechanicName: mechanicName,
+        estimatedDelivery: estimatedDelivery,
+        status: JobStatus.pending,
+        createdAt: DateTime.now(),
+      );
+
+      transaction.set(jobCardRef, card.toMap(jobCardNumber: jobCardNumber));
+      transaction.set(
+        settingsRef,
+        {'nextJobCardNumber': jobCardNumber + 1},
+        SetOptions(merge: true),
+      );
+
+      return card;
+    });
   }
 
   Future<void> updateJobCardStatus(String id, JobStatus status) async {
@@ -278,7 +290,14 @@ class GarageRepository {
   }
 
   Future<void> updateEstimateStatus(String id, EstimateStatus status) async {
+    if (status == EstimateStatus.converted) {
+      return;
+    }
     await _db.doc('estimates/$id').update({'status': status.name});
+  }
+
+  Future<void> reopenEstimate(String id) async {
+    await _db.doc('estimates/$id').update({'status': EstimateStatus.approved.name});
   }
 
   Stream<List<Invoice>> watchInvoices() {
