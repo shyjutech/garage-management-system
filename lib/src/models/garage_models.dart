@@ -391,6 +391,28 @@ class Invoice {
   double get balanceAmount =>
       (grandTotal - amountPaid).clamp(0, grandTotal).toDouble();
 
+  Invoice copyWith({
+    double? amountPaid,
+    PaymentStatus? paymentStatus,
+  }) {
+    return Invoice(
+      id: id,
+      invoiceNumber: invoiceNumber,
+      jobCardId: jobCardId,
+      customerId: customerId,
+      vehicleId: vehicleId,
+      vehicleNumber: vehicleNumber,
+      kmReading: kmReading,
+      labourItems: labourItems,
+      partsItems: partsItems,
+      labourTotal: labourTotal,
+      partsTotal: partsTotal,
+      amountPaid: amountPaid ?? this.amountPaid,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      createdAt: createdAt,
+    );
+  }
+
   factory Invoice.fromMap(String id, Map<String, dynamic> data) {
     return Invoice(
       id: id,

@@ -357,8 +357,91 @@ class _HomeShellState extends State<HomeShell> {
   }
 }
 
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
+
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  final regNumber = TextEditingController();
+  final km = TextEditingController();
+  final mechanic = TextEditingController();
+  final complaints = TextEditingController();
+  String fuelLevel = 'Half';
+  Vehicle? matchedVehicle;
+
+  @override
+  void dispose() {
+    regNumber.dispose();
+    km.dispose();
+    mechanic.dispose();
+    complaints.dispose();
+    super.dispose();
+  }
+
+  void _lookupVehicle(GarageStore store) {
+    final vehicle = store.findVehicleByRegNumber(regNumber.text);
+    setState(() {
+      matchedVehicle = vehicle;
+      if (vehicle != null && km.text.trim().isEmpty) {
+        km.text = vehicle.lastKmReading.toString();
+      }
+    });
+  }
+
+  Future<void> _createQuickJobCard(GarageStore store) async {
+    if (matchedVehicle == null) {
+      _lookupVehicle(store);
+      if (matchedVehicle == null) {
+        showAppSnackBar(
+          context,
+          'Vehicle not found. Add party and vehicle first.',
+        );
+        return;
+      }
+    }
+
+    final vehicle = matchedVehicle!;
+    final kmError = FormValidators.positiveKm(km.text);
+    final mechanicError = FormValidators.requiredText(mechanic.text, 'Mechanic');
+    final complaintError =
+        FormValidators.requiredText(complaints.text, 'Complaint');
+    final error = kmError ?? mechanicError ?? complaintError;
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+
+    final card = await store.addJobCard(
+      customerId: vehicle.customerId,
+      vehicleId: vehicle.id,
+      kmReading: int.parse(km.text.trim()),
+      fuelLevel: fuelLevel,
+      customerComplaints: complaints.text.trim(),
+      complaintItems: const [],
+      observations: '',
+      requestedWorks: '',
+      otherNotes: '',
+      internalNotes: '',
+      mechanicName: mechanic.text.trim(),
+    );
+
+    if (!mounted) return;
+    if (card == null) {
+      showAppSnackBar(context, store.lastError ?? 'Could not create job card');
+      return;
+    }
+
+    complaints.clear();
+    mechanic.clear();
+    showAppSnackBar(
+      context,
+      'Job card #${card.jobCardNumber} created',
+      backgroundColor: AppColors.success,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -401,6 +484,118 @@ class DashboardPage extends StatelessWidget {
             subtitle: 'Daily sales, workshop load, and payment status',
             icon: Icons.dashboard_rounded,
           ),
+          SectionCard(
+            title: 'Quick Job Card',
+            icon: Icons.build_circle_rounded,
+            subtitle: 'Enter vehicle number and open a job card immediately',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AppFormRow(
+                  children: [
+                    AppTextField(
+                      controller: regNumber,
+                      label: 'Vehicle Number *',
+                      expand: true,
+                      textCapitalization: TextCapitalization.characters,
+                      hint: 'e.g. KL60K3139',
+                      onChanged: (_) => _lookupVehicle(store),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: () => _lookupVehicle(store),
+                      icon: const Icon(Icons.search_rounded, size: 20),
+                      label: const Text('Find'),
+                    ),
+                  ],
+                ),
+                if (matchedVehicle != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          matchedVehicle!.regNumber,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${store.customerName(matchedVehicle!.customerId)} · '
+                          '${matchedVehicle!.brand} ${matchedVehicle!.model}',
+                          style: const TextStyle(color: AppColors.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  AppFormRow(
+                    children: [
+                      AppTextField(
+                        controller: km,
+                        label: 'KM Reading *',
+                        expand: true,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      ),
+                      AppTextField(
+                        controller: mechanic,
+                        label: 'Mechanic *',
+                        expand: true,
+                      ),
+                      DropdownButtonFormField<String>(
+                        value: fuelLevel,
+                        decoration: const InputDecoration(labelText: 'Fuel level'),
+                        items: const [
+                          DropdownMenuItem(value: 'Empty', child: Text('Empty')),
+                          DropdownMenuItem(value: 'Quarter', child: Text('1/4')),
+                          DropdownMenuItem(value: 'Half', child: Text('1/2')),
+                          DropdownMenuItem(value: 'Three Quarter', child: Text('3/4')),
+                          DropdownMenuItem(value: 'Full', child: Text('Full')),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => fuelLevel = value);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  AppMultilineField(
+                    controller: complaints,
+                    label: 'Customer complaint *',
+                    hint: 'What the customer reported...',
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                  AppFormActions(
+                    primary: FilledButton.icon(
+                      onPressed: () => _createQuickJobCard(store),
+                      icon: const Icon(Icons.note_add_rounded, size: 20),
+                      label: const Text('Create Job Card'),
+                    ),
+                  ),
+                ] else if (regNumber.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Vehicle not found. Register the party and vehicle under Party first.',
+                    style: TextStyle(color: AppColors.warning, fontSize: 13),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
           Wrap(
             spacing: 14,
             runSpacing: 14,
@@ -944,6 +1139,176 @@ class _StockPageState extends State<StockPage> {
   final minStock = TextEditingController();
 
   @override
+  void dispose() {
+    name.dispose();
+    sku.dispose();
+    price.dispose();
+    stock.dispose();
+    minStock.dispose();
+    super.dispose();
+  }
+
+  Future<void> _showEditStockDialog(GarageStore store, StockItem item) async {
+    final editName = TextEditingController(text: item.name);
+    final editSku = TextEditingController(text: item.sku);
+    final editPrice = TextEditingController(text: item.sellingPrice.toString());
+    final editStock = TextEditingController(text: item.currentStock.toString());
+    final editMinStock =
+        TextEditingController(text: item.minStockAlert.toString());
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit Stock Item'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppTextField(controller: editName, label: 'Item Name *', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(controller: editSku, label: 'SKU', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editPrice,
+                label: 'Selling Price *',
+                expand: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editStock,
+                label: 'Current Stock *',
+                expand: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editMinStock,
+                label: 'Min Alert *',
+                expand: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true) {
+      editName.dispose();
+      editSku.dispose();
+      editPrice.dispose();
+      editStock.dispose();
+      editMinStock.dispose();
+      return;
+    }
+
+    final nameError = FormValidators.requiredText(editName.text, 'Item name');
+    final priceValue = double.tryParse(editPrice.text.trim());
+    final stockValue = int.tryParse(editStock.text.trim());
+    final minValue = int.tryParse(editMinStock.text.trim());
+    final error = nameError ??
+        (priceValue == null || priceValue < 0
+            ? 'Selling price must be a valid number'
+            : null) ??
+        (stockValue == null || stockValue < 0
+            ? 'Current stock must be a valid number'
+            : null) ??
+        (minValue == null || minValue < 0
+            ? 'Min alert must be a valid number'
+            : null);
+
+    if (error != null) {
+      editName.dispose();
+      editSku.dispose();
+      editPrice.dispose();
+      editStock.dispose();
+      editMinStock.dispose();
+      if (mounted) {
+        showAppSnackBar(context, error);
+      }
+      return;
+    }
+
+    final ok = await store.updateStockItem(
+      item.copyWith(
+        name: editName.text.trim(),
+        sku: editSku.text.trim(),
+        sellingPrice: priceValue!,
+        currentStock: stockValue!,
+        minStockAlert: minValue!,
+      ),
+    );
+
+    editName.dispose();
+    editSku.dispose();
+    editPrice.dispose();
+    editStock.dispose();
+    editMinStock.dispose();
+
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not update item');
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Stock item updated',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _confirmDeleteStock(GarageStore store, StockItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete stock item?'),
+        content: Text(
+          'Remove "${item.name}" from inventory?\n\n'
+          'Past invoices that used this part will keep their records.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final ok = await store.deleteStockItem(item.id);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not delete item');
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Stock item deleted',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
     return SingleChildScrollView(
@@ -1011,12 +1376,33 @@ class _StockPageState extends State<StockPage> {
                         size: 22,
                       ),
                     ),
-                    trailing: Text(
-                      formatAmount(item.sellingPrice),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
-                      ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          formatAmount(item.sellingPrice),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Edit',
+                          onPressed: () => _showEditStockDialog(store, item),
+                          icon: const Icon(
+                            Icons.edit_outlined,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete',
+                          onPressed: () => _confirmDeleteStock(store, item),
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: AppColors.warning,
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -1514,6 +1900,151 @@ class _InvoicesPageState extends State<InvoicesPage> {
   final amountPaidController = TextEditingController(text: '0');
 
   @override
+  void dispose() {
+    labourDesc.dispose();
+    labourAmount.dispose();
+    partQty.dispose();
+    amountPaidController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _recordPayment(GarageStore store, Invoice invoice) async {
+    final amountController = TextEditingController(
+      text: invoice.grandTotal.toStringAsFixed(0),
+    );
+    var selectedStatus = paymentStatusForAmount(
+      invoice.grandTotal,
+      invoice.grandTotal,
+    );
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final amount = double.tryParse(amountController.text.trim()) ?? 0;
+          final suggested = paymentStatusForAmount(amount, invoice.grandTotal);
+          return AlertDialog(
+            title: Text('Payment · Invoice #${invoice.invoiceNumber}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Bill total: ${formatAmount(invoice.grandTotal)} · '
+                  'Paid so far: ${formatAmount(invoice.amountPaid)} · '
+                  'Balance: ${formatAmount(invoice.balanceAmount)}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: amountController,
+                  label: 'Total amount paid *',
+                  expand: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setDialogState(() {
+                    selectedStatus = paymentStatusForAmount(
+                      double.tryParse(amountController.text.trim()) ?? 0,
+                      invoice.grandTotal,
+                    );
+                  }),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<PaymentStatus>(
+                  value: selectedStatus,
+                  decoration: const InputDecoration(labelText: 'Payment status'),
+                  items: PaymentStatus.values
+                      .map(
+                        (status) => DropdownMenuItem(
+                          value: status,
+                          child: Text(status.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedStatus = value);
+                  },
+                ),
+                if (suggested != selectedStatus)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Suggested: ${suggested.label} based on amount',
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Save Payment'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (saved != true) {
+      amountController.dispose();
+      return;
+    }
+
+    final totalPaid = double.tryParse(amountController.text.trim()) ?? 0;
+    amountController.dispose();
+    if (totalPaid < 0) {
+      showAppSnackBar(context, 'Enter a valid amount');
+      return;
+    }
+
+    final error = await store.updateInvoicePayment(
+      invoiceId: invoice.id,
+      amountPaid: totalPaid,
+      paymentStatus: selectedStatus,
+    );
+
+    if (!mounted) return;
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Payment recorded for invoice #${invoice.invoiceNumber}',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _markInvoiceFullyPaid(GarageStore store, Invoice invoice) async {
+    if (invoice.paymentStatus == PaymentStatus.paid) {
+      return;
+    }
+    final error = await store.updateInvoicePayment(
+      invoiceId: invoice.id,
+      amountPaid: invoice.grandTotal,
+      paymentStatus: PaymentStatus.paid,
+    );
+    if (!mounted) return;
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Invoice #${invoice.invoiceNumber} marked as Paid',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
     final completedJobCards = store.jobCards
@@ -1540,6 +2071,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
       0,
       (sum, line) => sum + line.amountFor(store.stockItems),
     );
+    final stockWarning = store.validatePartsStock(partLines);
 
     return SingleChildScrollView(
       child: Column(
@@ -1580,7 +2112,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                       onPressed: selectedJobCardId == null
                           ? null
                           : () async {
-                              final success = await store.convertJobCardToInvoice(
+                              final error = await store.convertJobCardToInvoice(
                                 jobCardId: selectedJobCardId!,
                                 labourItems: labourLines,
                                 partsItems: partLines,
@@ -1591,19 +2123,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
                                         amountPaidController.text.trim()) ??
                                     0,
                               );
-                              if (!success) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text(
-                                      'Insufficient stock for one or more parts',
-                                    ),
-                                    backgroundColor: AppColors.warning,
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                );
+                              if (error != null) {
+                                showAppSnackBar(context, error);
                                 return;
                               }
                               setState(() {
@@ -1693,12 +2214,23 @@ class _InvoicesPageState extends State<InvoicesPage> {
                           return;
                         }
                         setState(() {
-                          partLines.add(
-                            PartLineDraft(
-                              stockItemId: partStockItemId!,
-                              qty: qty,
-                            ),
+                          final existingIndex = partLines.indexWhere(
+                            (line) => line.stockItemId == partStockItemId,
                           );
+                          if (existingIndex >= 0) {
+                            final existing = partLines[existingIndex];
+                            partLines[existingIndex] = PartLineDraft(
+                              stockItemId: existing.stockItemId,
+                              qty: existing.qty + qty,
+                            );
+                          } else {
+                            partLines.add(
+                              PartLineDraft(
+                                stockItemId: partStockItemId!,
+                                qty: qty,
+                              ),
+                            );
+                          }
                         });
                         partQty.text = '1';
                       },
@@ -1707,6 +2239,13 @@ class _InvoicesPageState extends State<InvoicesPage> {
               ),
             ],
           ),
+          if (stockWarning != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              stockWarning,
+              style: const TextStyle(color: AppColors.warning, fontSize: 13),
+            ),
+          ],
           ...partLines.map(
             (line) => DataListTile(
               title: store.stockItemName(line.stockItemId),
@@ -1781,6 +2320,24 @@ class _InvoicesPageState extends State<InvoicesPage> {
                           color: AppColors.primary,
                         ),
                       ),
+                      if (invoice.paymentStatus != PaymentStatus.paid) ...[
+                        IconButton(
+                          tooltip: 'Mark fully paid',
+                          onPressed: () => _markInvoiceFullyPaid(store, invoice),
+                          icon: const Icon(
+                            Icons.payments_rounded,
+                            color: AppColors.success,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Record payment',
+                          onPressed: () => _recordPayment(store, invoice),
+                          icon: const Icon(
+                            Icons.account_balance_wallet_outlined,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
                       IconButton(
                         tooltip: 'Print PDF',
                         onPressed: () async {
@@ -2234,16 +2791,12 @@ class _EstimatesPageState extends State<EstimatesPage> {
                       final convertButton = canConvert
                           ? FilledButton.tonalIcon(
                               onPressed: () async {
-                                final ok = await store.convertEstimateToInvoice(
+                                final error = await store.convertEstimateToInvoice(
                                   estimate.id,
                                 );
                                 if (!context.mounted) return;
-                                if (!ok) {
-                                  showAppSnackBar(
-                                    context,
-                                    store.lastError ??
-                                        'Could not convert — check stock availability or Cloud Functions',
-                                  );
+                                if (error != null) {
+                                  showAppSnackBar(context, error);
                                   return;
                                 }
                                 showAppSnackBar(

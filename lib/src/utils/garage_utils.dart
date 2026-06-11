@@ -1,4 +1,15 @@
+import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:intl/intl.dart';
+
+PaymentStatus paymentStatusForAmount(double amountPaid, double grandTotal) {
+  if (amountPaid >= grandTotal && grandTotal > 0) {
+    return PaymentStatus.paid;
+  }
+  if (amountPaid > 0) {
+    return PaymentStatus.partial;
+  }
+  return PaymentStatus.unpaid;
+}
 
 String normalizeRegNumber(String input) {
   return input.toUpperCase().replaceAll(RegExp(r'[\s\-]'), '');

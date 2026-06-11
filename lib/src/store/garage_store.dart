@@ -342,6 +342,56 @@ class GarageStore extends ChangeNotifier {
     return item;
   }
 
+  Future<bool> updateStockItem(StockItem item, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateStockItem(item);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = stockItems.indexWhere((stock) => stock.id == item.id);
+    if (index == -1) {
+      return false;
+    }
+    stockItems[index] = item;
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Future<bool> deleteStockItem(String id, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.deleteStockItem(id);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = stockItems.indexWhere((stock) => stock.id == id);
+    if (index == -1) {
+      return false;
+    }
+    stockItems.removeAt(index);
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
   Future<JobCard?> addJobCard({
     required String customerId,
     required String vehicleId,
@@ -466,15 +516,44 @@ class GarageStore extends ChangeNotifier {
     }
   }
 
-  Future<bool> convertJobCardToInvoice({
+  /// Returns null when stock is OK, otherwise a short reason.
+  String? validatePartsStock(List<PartLineDraft> partsItems) {
+    if (partsItems.isEmpty) {
+      return null;
+    }
+    final totals = <String, int>{};
+    for (final line in partsItems) {
+      totals[line.stockItemId] = (totals[line.stockItemId] ?? 0) + line.qty;
+    }
+    for (final entry in totals.entries) {
+      final item =
+          stockItems.where((stock) => stock.id == entry.key).firstOrNull;
+      if (item == null) {
+        return 'Part not found in stock list';
+      }
+      if (item.currentStock < entry.value) {
+        return '${item.name}: need ${entry.value}, only ${item.currentStock} in stock';
+      }
+    }
+    return null;
+  }
+
+  /// Returns null on success, or an error message.
+  Future<String?> convertJobCardToInvoice({
     required String jobCardId,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
     required PaymentStatus paymentStatus,
     required double amountPaid,
   }) async {
+    final stockError = validatePartsStock(partsItems);
+    if (stockError != null) {
+      lastError = stockError;
+      return stockError;
+    }
+
     if (_repo != null) {
-      return _repo.convertJobCardToInvoice(
+      final error = await _repo.convertJobCardToInvoice(
         jobCardId: jobCardId,
         labourItems: labourItems,
         partsItems: partsItems,
@@ -482,14 +561,24 @@ class GarageStore extends ChangeNotifier {
         amountPaid: amountPaid,
         stockItems: stockItems,
       );
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
     }
-    return _convertJobCardToInvoiceMemory(
+
+    final ok = _convertJobCardToInvoiceMemory(
       jobCardId: jobCardId,
       labourItems: labourItems,
       partsItems: partsItems,
       paymentStatus: paymentStatus,
       amountPaid: amountPaid,
     );
+    if (!ok) {
+      lastError = 'Could not create invoice';
+      return lastError;
+    }
+    return null;
   }
 
   bool _convertJobCardToInvoiceMemory({
@@ -502,12 +591,6 @@ class GarageStore extends ChangeNotifier {
     final jobCardIndex = jobCards.indexWhere((jobCard) => jobCard.id == jobCardId);
     if (jobCardIndex == -1) {
       return false;
-    }
-    for (final line in partsItems) {
-      final item = stockItems.where((stock) => stock.id == line.stockItemId).firstOrNull;
-      if (item == null || item.currentStock < line.qty) {
-        return false;
-      }
     }
     for (final line in partsItems) {
       final stockIndex = stockItems.indexWhere((item) => item.id == line.stockItemId);
@@ -741,11 +824,82 @@ class GarageStore extends ChangeNotifier {
     }
   }
 
-  Future<bool> convertEstimateToInvoice(String estimateId) async {
-    if (_repo != null) {
-      return _repo.convertEstimateToInvoice(estimateId);
+  Future<String?> updateInvoicePayment({
+    required String invoiceId,
+    required double amountPaid,
+    PaymentStatus? paymentStatus,
+  }) async {
+    final index = invoices.indexWhere((invoice) => invoice.id == invoiceId);
+    if (index == -1) {
+      lastError = 'Invoice not found';
+      return lastError;
     }
-    return _convertEstimateToInvoiceMemory(estimateId);
+
+    final invoice = invoices[index];
+    final clampedPaid = amountPaid.clamp(0, invoice.grandTotal).toDouble();
+    final resolvedStatus =
+        paymentStatus ?? paymentStatusForAmount(clampedPaid, invoice.grandTotal);
+
+    if (_repo != null) {
+      final error = await _repo.updateInvoicePayment(
+        invoiceId: invoiceId,
+        amountPaid: clampedPaid,
+        paymentStatus: resolvedStatus,
+      );
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
+    }
+
+    invoices[index] = invoice.copyWith(
+      amountPaid: clampedPaid,
+      paymentStatus: resolvedStatus,
+    );
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> convertEstimateToInvoice(String estimateId) async {
+    final estimate =
+        estimates.where((item) => item.id == estimateId).firstOrNull;
+    if (estimate == null) {
+      lastError = 'Estimate not found';
+      return lastError;
+    }
+    if (estimate.status == EstimateStatus.converted) {
+      lastError = 'Estimate already converted';
+      return lastError;
+    }
+
+    final partDrafts = estimate.partsItems
+        .map(
+          (line) => PartLineDraft(
+            stockItemId: line.stockItemId,
+            qty: line.qty,
+          ),
+        )
+        .toList();
+    final stockError = validatePartsStock(partDrafts);
+    if (stockError != null) {
+      lastError = stockError;
+      return stockError;
+    }
+
+    if (_repo != null) {
+      final error = await _repo.convertEstimateToInvoice(estimateId);
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
+    }
+
+    final ok = _convertEstimateToInvoiceMemory(estimateId);
+    if (!ok) {
+      lastError = 'Could not create invoice';
+      return lastError;
+    }
+    return null;
   }
 
   bool _convertEstimateToInvoiceMemory(String estimateId) {
@@ -868,6 +1022,22 @@ class GarageStore extends ChangeNotifier {
       UserRole.mechanic => 'Can update job card status and notes.',
       UserRole.accountant => 'Can view dashboard, invoices, and totals.',
     };
+  }
+
+  Vehicle? findVehicleByRegNumber(String query) {
+    final normalized = normalizeRegNumber(query.trim());
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final exact = vehicles
+        .where((vehicle) => vehicle.regNumberNormalized == normalized)
+        .firstOrNull;
+    if (exact != null) {
+      return exact;
+    }
+    return vehicles
+        .where((vehicle) => vehicle.regNumberNormalized.contains(normalized))
+        .firstOrNull;
   }
 
   List<Vehicle> searchVehicles(String query) {

@@ -257,6 +257,7 @@ class AppTextField extends StatelessWidget {
     this.textCapitalization = TextCapitalization.none,
     this.expand = false,
     this.hint,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -269,6 +270,7 @@ class AppTextField extends StatelessWidget {
   final TextCapitalization textCapitalization;
   final bool expand;
   final String? hint;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +283,7 @@ class AppTextField extends StatelessWidget {
         inputFormatters: inputFormatters,
         maxLength: maxLength,
         textCapitalization: textCapitalization,
+        onChanged: onChanged,
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,

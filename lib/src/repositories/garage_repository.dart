@@ -1,20 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/utils/garage_utils.dart';
 
+class _InvoiceException implements Exception {
+  _InvoiceException(this.message);
+  final String message;
+}
+
 class GarageRepository {
   GarageRepository({
     FirebaseFirestore? firestore,
-    FirebaseFunctions? functions,
     FirebaseAuth? auth,
   })  : _db = firestore ?? FirebaseFirestore.instance,
-        _functions = functions ?? FirebaseFunctions.instance,
         _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFirestore _db;
-  final FirebaseFunctions _functions;
   final FirebaseAuth _auth;
 
   DocumentReference<Map<String, dynamic>> get _settingsRef =>
@@ -133,6 +134,14 @@ class GarageRepository {
     );
     await ref.set(item.toMap());
     return item;
+  }
+
+  Future<void> updateStockItem(StockItem item) async {
+    await _db.doc('stock_items/${item.id}').update(item.toMap());
+  }
+
+  Future<void> deleteStockItem(String id) async {
+    await _db.doc('stock_items/$id').delete();
   }
 
   Stream<List<JobCard>> watchJobCards() {
@@ -289,6 +298,22 @@ class GarageRepository {
     return true;
   }
 
+  Future<String?> updateInvoicePayment({
+    required String invoiceId,
+    required double amountPaid,
+    required PaymentStatus paymentStatus,
+  }) async {
+    try {
+      await _db.doc('invoices/$invoiceId').update({
+        'amountPaid': amountPaid,
+        'paymentStatus': paymentStatus.name,
+      });
+      return null;
+    } catch (error) {
+      return 'Could not update payment: $error';
+    }
+  }
+
   Future<void> updateEstimateStatus(String id, EstimateStatus status) async {
     if (status == EstimateStatus.converted) {
       return;
@@ -317,7 +342,7 @@ class GarageRepository {
         .map(_mapStockTransactions);
   }
 
-  Future<bool> convertJobCardToInvoice({
+  Future<String?> convertJobCardToInvoice({
     required String jobCardId,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
@@ -325,28 +350,208 @@ class GarageRepository {
     required double amountPaid,
     required Iterable<StockItem> stockItems,
   }) async {
-    final callable = _functions.httpsCallable('createInvoiceFromJobCard');
+    final partRecords = _partRecordsFromDrafts(partsItems, stockItems);
     try {
-      await callable.call<Map<String, dynamic>>({
-        'jobCardId': jobCardId,
-        'labourItems': labourItemsToCallable(labourItems),
-        'partsItems': partsDraftsToCallable(partsItems, stockItems),
-        'amountPaid': amountPaid,
-        'paymentStatus': paymentStatus.name,
+      await _db.runTransaction((transaction) async {
+        final jobCardRef = _db.doc('jobcards/$jobCardId');
+        final invoiceRef = _db.collection('invoices').doc();
+
+        final settingsSnap = await transaction.get(_settingsRef);
+        final jobCardSnap = await transaction.get(jobCardRef);
+
+        if (!jobCardSnap.exists || jobCardSnap.data() == null) {
+          throw _InvoiceException('Job card not found');
+        }
+
+        final jobCard = JobCard.fromMap(jobCardId, jobCardSnap.data()!);
+        final invoiceNumber = settingsSnap.exists
+            ? (settingsSnap.data()?['nextInvoiceNumber'] as num?)?.toInt() ?? 1
+            : 1;
+
+        final stockSnaps = await _readStockSnapshots(transaction, partRecords);
+        final vehicleNumber = await _vehicleNumberInTransaction(
+          transaction,
+          jobCard.vehicleId,
+        );
+        _applyStockDeduction(
+          transaction: transaction,
+          partsItems: partRecords,
+          invoiceId: invoiceRef.id,
+          stockSnaps: stockSnaps,
+        );
+
+        final labourTotal =
+            labourItems.fold<double>(0, (sum, item) => sum + item.amount);
+        final partsTotal =
+            partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+
+        transaction.set(invoiceRef, {
+          'invoiceNumber': invoiceNumber,
+          'jobCardId': jobCardId,
+          'customerId': jobCard.customerId,
+          'vehicleId': jobCard.vehicleId,
+          'vehicleNumber': vehicleNumber,
+          'kmReading': jobCard.kmReading,
+          'labourItems': labourItems.map((item) => item.toMap()).toList(),
+          'partsItems': partRecords.map((item) => item.toMap()).toList(),
+          'labourTotal': labourTotal,
+          'partsTotal': partsTotal,
+          'grandTotal': labourTotal + partsTotal,
+          'amountPaid': amountPaid,
+          'paymentStatus': paymentStatus.name,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(jobCardRef, {'status': JobStatus.delivered.firestoreValue});
+        transaction.set(
+          _settingsRef,
+          {'nextInvoiceNumber': invoiceNumber + 1},
+          SetOptions(merge: true),
+        );
       });
-      return true;
-    } on FirebaseFunctionsException {
-      return false;
+      return null;
+    } on _InvoiceException catch (error) {
+      return error.message;
+    } catch (error) {
+      return 'Invoice failed: $error';
     }
   }
 
-  Future<bool> convertEstimateToInvoice(String estimateId) async {
-    final callable = _functions.httpsCallable('createInvoiceFromEstimate');
+  Future<String?> convertEstimateToInvoice(String estimateId) async {
     try {
-      await callable.call<Map<String, dynamic>>({'estimateId': estimateId});
-      return true;
-    } on FirebaseFunctionsException {
-      return false;
+      await _db.runTransaction((transaction) async {
+        final estimateRef = _db.doc('estimates/$estimateId');
+        final invoiceRef = _db.collection('invoices').doc();
+
+        final settingsSnap = await transaction.get(_settingsRef);
+        final estimateSnap = await transaction.get(estimateRef);
+
+        if (!estimateSnap.exists || estimateSnap.data() == null) {
+          throw _InvoiceException('Estimate not found');
+        }
+
+        final estimate = Estimate.fromMap(estimateId, estimateSnap.data()!);
+        if (estimate.status == EstimateStatus.converted) {
+          throw _InvoiceException('Estimate already converted');
+        }
+
+        final invoiceNumber = settingsSnap.exists
+            ? (settingsSnap.data()?['nextInvoiceNumber'] as num?)?.toInt() ?? 1
+            : 1;
+
+        final stockSnaps =
+            await _readStockSnapshots(transaction, estimate.partsItems);
+        _applyStockDeduction(
+          transaction: transaction,
+          partsItems: estimate.partsItems,
+          invoiceId: invoiceRef.id,
+          stockSnaps: stockSnaps,
+        );
+
+        transaction.set(invoiceRef, {
+          'invoiceNumber': invoiceNumber,
+          'jobCardId': estimate.jobCardId,
+          'customerId': estimate.customerId,
+          'vehicleId': estimate.vehicleId,
+          'vehicleNumber': estimate.vehicleNumber,
+          'kmReading': estimate.kmReading,
+          'labourItems':
+              estimate.labourItems.map((item) => item.toMap()).toList(),
+          'partsItems':
+              estimate.partsItems.map((item) => item.toMap()).toList(),
+          'labourTotal': estimate.labourTotal,
+          'partsTotal': estimate.partsTotal,
+          'grandTotal': estimate.grandTotal,
+          'amountPaid': 0,
+          'paymentStatus': PaymentStatus.unpaid.name,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(estimateRef, {'status': EstimateStatus.converted.name});
+
+        if (estimate.jobCardId != null) {
+          transaction.update(
+            _db.doc('jobcards/${estimate.jobCardId}'),
+            {'status': JobStatus.delivered.firestoreValue},
+          );
+        }
+
+        transaction.set(
+          _settingsRef,
+          {'nextInvoiceNumber': invoiceNumber + 1},
+          SetOptions(merge: true),
+        );
+      });
+      return null;
+    } on _InvoiceException catch (error) {
+      return error.message;
+    } catch (error) {
+      return 'Invoice failed: $error';
+    }
+  }
+
+  Future<Map<String, DocumentSnapshot<Map<String, dynamic>>>> _readStockSnapshots(
+    Transaction transaction,
+    List<InvoicePartLine> partsItems,
+  ) async {
+    final ids = partsItems.map((part) => part.stockItemId).toSet();
+    final snaps = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+    for (final id in ids) {
+      snaps[id] = await transaction.get(_db.doc('stock_items/$id'));
+    }
+    return snaps;
+  }
+
+  Future<String> _vehicleNumberInTransaction(
+    Transaction transaction,
+    String vehicleId,
+  ) async {
+    final snap = await transaction.get(_db.doc('vehicles/$vehicleId'));
+    if (!snap.exists || snap.data() == null) {
+      return 'Unknown vehicle';
+    }
+    return snap.data()!['regNumber'] as String? ?? 'Unknown vehicle';
+  }
+
+  void _applyStockDeduction({
+    required Transaction transaction,
+    required List<InvoicePartLine> partsItems,
+    required String invoiceId,
+    required Map<String, DocumentSnapshot<Map<String, dynamic>>> stockSnaps,
+  }) {
+    final totals = <String, int>{};
+    final names = <String, String>{};
+    for (final part in partsItems) {
+      totals[part.stockItemId] = (totals[part.stockItemId] ?? 0) + part.qty;
+      names[part.stockItemId] = part.name;
+    }
+
+    for (final entry in totals.entries) {
+      final snap = stockSnaps[entry.key];
+      if (snap == null || !snap.exists || snap.data() == null) {
+        throw _InvoiceException('Stock item ${entry.key} missing');
+      }
+      final current =
+          (snap.data()!['currentStock'] as num?)?.toInt() ?? 0;
+      if (current < entry.value) {
+        throw _InvoiceException(
+          'Insufficient stock for ${names[entry.key] ?? entry.key}',
+        );
+      }
+      transaction.update(snap.reference, {
+        'currentStock': current - entry.value,
+      });
+    }
+
+    for (final part in partsItems) {
+      transaction.set(_db.collection('stock_transactions').doc(), {
+        'stockItemId': part.stockItemId,
+        'type': 'out',
+        'qty': part.qty,
+        'referenceType': 'invoice',
+        'referenceId': invoiceId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     }
   }
 
