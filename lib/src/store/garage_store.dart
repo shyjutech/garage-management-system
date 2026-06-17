@@ -16,10 +16,13 @@ class GarageStore extends ChangeNotifier {
 
   final GarageRepository? _repo;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
+  bool _disposed = false;
+  bool _initialized = false;
 
   final customers = <Customer>[];
   final vehicles = <Vehicle>[];
   final stockItems = <StockItem>[];
+  final labourItems = <LabourItem>[];
   final jobCards = <JobCard>[];
   final estimates = <Estimate>[];
   final invoices = <Invoice>[];
@@ -29,85 +32,154 @@ class GarageStore extends ChangeNotifier {
   UserRole activeRole = UserRole.admin;
   bool loading = false;
   String? lastError;
+  String? pendingEstimateJobCardId;
 
   bool get useFirestore => _repo != null;
+
+  void openEstimateForJobCard(String jobCardId) {
+    pendingEstimateJobCardId = jobCardId;
+    notifyListeners();
+  }
+
+  void clearPendingEstimateJobCard() {
+    if (pendingEstimateJobCardId == null) {
+      return;
+    }
+    pendingEstimateJobCardId = null;
+    notifyListeners();
+  }
 
   int _customerCounter = 1;
   int _vehicleCounter = 1;
   int _stockCounter = 1;
+  int _labourCounter = 1;
 
   Future<void> initialize() async {
     final repo = _repo;
-    if (repo == null) {
+    if (repo == null || _initialized || _disposed) {
       return;
     }
+    _initialized = true;
     loading = true;
     notifyListeners();
 
     try {
       await repo.ensureSettings();
+      if (_disposed) {
+        return;
+      }
       activeRole = await repo.loadUserRole();
+      if (_disposed) {
+        return;
+      }
 
       _subscriptions
         ..add(repo.watchSettings().listen((value) {
+          if (_disposed) {
+            return;
+          }
           settings = value;
           notifyListeners();
         }))
         ..add(repo.watchCustomers().listen((value) {
+          if (_disposed) {
+            return;
+          }
           customers
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
         ..add(repo.watchVehicles().listen((value) {
+          if (_disposed) {
+            return;
+          }
           vehicles
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
         ..add(repo.watchStockItems().listen((value) {
+          if (_disposed) {
+            return;
+          }
           stockItems
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
+        ..add(repo.watchLabourItems().listen((value) {
+          if (_disposed) {
+            return;
+          }
+          labourItems
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
         ..add(repo.watchJobCards().listen((value) {
+          if (_disposed) {
+            return;
+          }
           jobCards
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
         ..add(repo.watchEstimates().listen((value) {
+          if (_disposed) {
+            return;
+          }
           estimates
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
         ..add(repo.watchInvoices().listen((value) {
+          if (_disposed) {
+            return;
+          }
           invoices
             ..clear()
             ..addAll(value);
           notifyListeners();
         }))
         ..add(repo.watchStockTransactions().listen((value) {
+          if (_disposed) {
+            return;
+          }
           stockTransactions
             ..clear()
             ..addAll(value);
           notifyListeners();
         }));
     } catch (error) {
-      lastError = error.toString();
+      if (!_disposed) {
+        lastError = error.toString();
+      }
     } finally {
-      loading = false;
-      notifyListeners();
+      if (!_disposed) {
+        loading = false;
+        notifyListeners();
+      }
     }
   }
 
   @override
+  void notifyListeners() {
+    if (_disposed) {
+      return;
+    }
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
+    _subscriptions.clear();
     super.dispose();
   }
 
@@ -148,6 +220,11 @@ class GarageStore extends ChangeNotifier {
       minStockAlert: 2,
       notify: false,
     );
+    _addLabourItemMemory(name: 'Painting', defaultRate: 2500, notify: false);
+    _addLabourItemMemory(name: 'Welding', defaultRate: 800, notify: false);
+    _addLabourItemMemory(name: 'General Service', defaultRate: 500, notify: false);
+    _addLabourItemMemory(name: 'AC Repair', defaultRate: 1200, notify: false);
+    _addLabourItemMemory(name: 'Denting', defaultRate: 1500, notify: false);
     _addJobCardMemory(
       customerId: customer.id,
       vehicleId: vehicle.id,
@@ -386,6 +463,97 @@ class GarageStore extends ChangeNotifier {
       return false;
     }
     stockItems.removeAt(index);
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Future<LabourItem?> addLabourItem({
+    required String name,
+    required double defaultRate,
+    bool notify = true,
+  }) async {
+    final repo = _repo;
+    if (repo != null) {
+      try {
+        return await repo.addLabourItem(name: name, defaultRate: defaultRate);
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return null;
+      }
+    }
+    return _addLabourItemMemory(
+      name: name,
+      defaultRate: defaultRate,
+      notify: notify,
+    );
+  }
+
+  LabourItem _addLabourItemMemory({
+    required String name,
+    required double defaultRate,
+    bool notify = true,
+  }) {
+    final item = LabourItem(
+      id: 'L${_labourCounter++}',
+      name: name,
+      defaultRate: defaultRate,
+    );
+    labourItems.insert(0, item);
+    if (notify) {
+      notifyListeners();
+    }
+    return item;
+  }
+
+  Future<bool> updateLabourItem(LabourItem item, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateLabourItem(item);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = labourItems.indexWhere((labour) => labour.id == item.id);
+    if (index == -1) {
+      return false;
+    }
+    labourItems[index] = item;
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Future<bool> deleteLabourItem(String id, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.deleteLabourItem(id);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = labourItems.indexWhere((labour) => labour.id == id);
+    if (index == -1) {
+      return false;
+    }
+    labourItems.removeAt(index);
     if (notify) {
       notifyListeners();
     }
@@ -770,6 +938,63 @@ class GarageStore extends ChangeNotifier {
     return true;
   }
 
+  Future<bool> updateEstimate({
+    required String id,
+    required List<InvoiceLineDraft> labourLines,
+    required List<PartLineDraft> partsItems,
+    String notes = '',
+    bool notify = true,
+  }) async {
+    if (labourLines.isEmpty && partsItems.isEmpty) {
+      return false;
+    }
+
+    if (_repo != null) {
+      try {
+        return await _repo.updateEstimate(
+          id: id,
+          labourItems: labourLines,
+          partsItems: partsItems,
+          notes: notes,
+          stockItems: stockItems,
+        );
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = estimates.indexWhere((estimate) => estimate.id == id);
+    if (index == -1) {
+      return false;
+    }
+    final existing = estimates[index];
+    if (existing.status == EstimateStatus.converted) {
+      return false;
+    }
+
+    final partRecords = _partRecordsFromDrafts(partsItems);
+    final labourTotal =
+        labourLines.fold<double>(0, (sum, item) => sum + item.amount);
+    final partsTotal =
+        partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+
+    estimates[index] = existing.copyWith(
+      labourItems: List.of(labourLines),
+      partsItems: partRecords,
+      labourTotal: labourTotal,
+      partsTotal: partsTotal,
+      notes: notes,
+    );
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
   Future<void> reopenEstimate(String id, {bool notify = true}) async {
     if (_repo != null) {
       try {
@@ -1059,12 +1284,31 @@ class GarageStore extends ChangeNotifier {
     }).toList();
   }
 
+  List<Customer> searchCustomers(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      return customers;
+    }
+    final lower = trimmed.toLowerCase();
+    return customers.where((customer) {
+      return customer.name.toLowerCase().contains(lower) ||
+          customer.mobile.contains(trimmed) ||
+          customer.address.toLowerCase().contains(lower);
+    }).toList();
+  }
+
   List<Invoice> invoicesByVehicle(String vehicleId) {
-    return invoices.where((invoice) => invoice.vehicleId == vehicleId).toList();
+    return invoices
+        .where((invoice) => invoice.vehicleId == vehicleId)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   List<Estimate> estimatesByVehicle(String vehicleId) {
-    return estimates.where((estimate) => estimate.vehicleId == vehicleId).toList();
+    return estimates
+        .where((estimate) => estimate.vehicleId == vehicleId)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   int get openEstimates => estimates
@@ -1075,9 +1319,25 @@ class GarageStore extends ChangeNotifier {
       )
       .length;
 
+  Estimate? estimateForJobCard(String jobCardId) {
+    return estimates
+        .where(
+          (estimate) =>
+              estimate.jobCardId == jobCardId &&
+              estimate.status != EstimateStatus.converted &&
+              estimate.status != EstimateStatus.rejected,
+        )
+        .firstOrNull;
+  }
+
   String customerName(String id) {
     return customers.where((item) => item.id == id).firstOrNull?.name ??
         'Unknown customer';
+  }
+
+  String customerMobile(String id) {
+    return customers.where((item) => item.id == id).firstOrNull?.mobile ??
+        '';
   }
 
   String vehicleNumber(String id) {

@@ -54,6 +54,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin() || isBilling();
     }
 
+    match /labour_items/{itemId} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin() || isBilling();
+    }
+
     match /stock_transactions/{txId} {
       allow read: if isStaff();
       allow create: if isAdmin() || isBilling();

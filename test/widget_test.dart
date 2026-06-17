@@ -35,4 +35,34 @@ void main() {
     expect(find.text('Party'), findsOneWidget);
     expect(find.text('Job Cards'), findsOneWidget);
   });
+
+  testWidgets('estimates page renders without autocomplete errors',
+      (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(size: Size(1280, 800)),
+        child: ChangeNotifierProvider(
+          create: (_) => GarageStore.memory()..seed(),
+          child: MaterialApp(
+            theme: AppTheme.light,
+            home: const HomeShell(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Estimates'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open Estimates'), findsOneWidget);
+
+    await tester.tap(find.text('Job Cards'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Live Job Cards'), findsOneWidget);
+  });
 }

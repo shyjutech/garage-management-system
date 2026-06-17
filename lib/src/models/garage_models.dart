@@ -131,6 +131,43 @@ class StockItem {
       };
 }
 
+class LabourItem {
+  const LabourItem({
+    required this.id,
+    required this.name,
+    required this.defaultRate,
+  });
+
+  final String id;
+  final String name;
+  final double defaultRate;
+
+  LabourItem copyWith({
+    String? id,
+    String? name,
+    double? defaultRate,
+  }) {
+    return LabourItem(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      defaultRate: defaultRate ?? this.defaultRate,
+    );
+  }
+
+  factory LabourItem.fromMap(String id, Map<String, dynamic> data) {
+    return LabourItem(
+      id: id,
+      name: data['name'] as String? ?? '',
+      defaultRate: (data['defaultRate'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'defaultRate': defaultRate,
+      };
+}
+
 enum JobStatus { pending, inProgress, completed, delivered }
 
 extension JobStatusX on JobStatus {

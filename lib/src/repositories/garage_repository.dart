@@ -144,6 +144,36 @@ class GarageRepository {
     await _db.doc('stock_items/$id').delete();
   }
 
+  Stream<List<LabourItem>> watchLabourItems() {
+    return _db
+        .collection('labour_items')
+        .orderBy('name')
+        .snapshots()
+        .map(_mapLabourItems);
+  }
+
+  Future<LabourItem> addLabourItem({
+    required String name,
+    required double defaultRate,
+  }) async {
+    final ref = _db.collection('labour_items').doc();
+    final item = LabourItem(
+      id: ref.id,
+      name: name,
+      defaultRate: defaultRate,
+    );
+    await ref.set(item.toMap());
+    return item;
+  }
+
+  Future<void> updateLabourItem(LabourItem item) async {
+    await _db.doc('labour_items/${item.id}').update(item.toMap());
+  }
+
+  Future<void> deleteLabourItem(String id) async {
+    await _db.doc('labour_items/$id').delete();
+  }
+
   Stream<List<JobCard>> watchJobCards() {
     return _db
         .collection('jobcards')
@@ -312,6 +342,44 @@ class GarageRepository {
     } catch (error) {
       return 'Could not update payment: $error';
     }
+  }
+
+  Future<bool> updateEstimate({
+    required String id,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    String notes = '',
+    required Iterable<StockItem> stockItems,
+  }) async {
+    if (labourItems.isEmpty && partsItems.isEmpty) {
+      return false;
+    }
+
+    final ref = _db.doc('estimates/$id');
+    final snapshot = await ref.get();
+    if (!snapshot.exists || snapshot.data() == null) {
+      return false;
+    }
+
+    final existing = Estimate.fromMap(id, snapshot.data()!);
+    if (existing.status == EstimateStatus.converted) {
+      return false;
+    }
+
+    final partRecords = _partRecordsFromDrafts(partsItems, stockItems);
+    final labourTotal =
+        labourItems.fold<double>(0, (sum, item) => sum + item.amount);
+    final partsTotal =
+        partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+
+    await ref.update({
+      'labourItems': labourItems.map((item) => item.toMap()).toList(),
+      'partsItems': partRecords.map((item) => item.toMap()).toList(),
+      'labourTotal': labourTotal,
+      'partsTotal': partsTotal,
+      'notes': notes,
+    });
+    return true;
   }
 
   Future<void> updateEstimateStatus(String id, EstimateStatus status) async {
@@ -570,6 +638,12 @@ class GarageRepository {
   List<StockItem> _mapStockItems(QuerySnapshot<Map<String, dynamic>> snapshot) {
     return snapshot.docs
         .map((doc) => StockItem.fromMap(doc.id, doc.data()))
+        .toList();
+  }
+
+  List<LabourItem> _mapLabourItems(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    return snapshot.docs
+        .map((doc) => LabourItem.fromMap(doc.id, doc.data()))
         .toList();
   }
 

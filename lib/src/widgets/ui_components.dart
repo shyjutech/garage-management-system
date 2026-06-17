@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
+import 'package:garage_management_system/src/utils/garage_utils.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
 
 void showAppSnackBar(
@@ -119,11 +121,14 @@ class SectionCard extends StatelessWidget {
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(width: 8),
-                  Text(
-                    subtitle!,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textMuted,
+                  Expanded(
+                    child: Text(
+                      subtitle!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textMuted,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -145,12 +150,14 @@ class MetricCard extends StatelessWidget {
     required this.value,
     this.icon,
     this.accentColor,
+    this.onTap,
   });
 
   final String label;
   final String value;
   final IconData? icon;
   final Color? accentColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -162,52 +169,66 @@ class MetricCard extends StatelessWidget {
             ? (screenWidth - 40) / 2
             : 200.0;
 
-    return SizedBox(
-      width: cardWidth,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final content = Padding(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  if (icon != null)
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(icon, size: 20, color: color),
-                    ),
-                  const Spacer(),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.3,
+              if (icon != null)
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 20, color: color),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  letterSpacing: -0.5,
+              const Spacer(),
+              if (onTap != null)
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 18,
+                  color: color.withValues(alpha: 0.7),
                 ),
-              ),
             ],
           ),
-        ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ],
       ),
+    );
+
+    return SizedBox(
+      width: cardWidth,
+      child: onTap == null
+          ? Card(child: content)
+          : Card(
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onTap,
+                child: content,
+              ),
+            ),
     );
   }
 }
@@ -598,6 +619,539 @@ class SidebarNavItem extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class LabourSearchField extends StatefulWidget {
+  const LabourSearchField({
+    super.key,
+    required this.controller,
+    required this.items,
+    required this.onSelected,
+    this.onChanged,
+    this.width = 260,
+  });
+
+  final TextEditingController controller;
+  final List<LabourItem> items;
+  final ValueChanged<LabourItem> onSelected;
+  final ValueChanged<String>? onChanged;
+  final double width;
+
+  @override
+  State<LabourSearchField> createState() => _LabourSearchFieldState();
+}
+
+class _LabourSearchFieldState extends State<LabourSearchField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fieldWidth = AppBreakpoints.fieldWidth(context, widget.width);
+    return SizedBox(
+      width: fieldWidth,
+      child: RawAutocomplete<LabourItem>(
+        textEditingController: widget.controller,
+        focusNode: _focusNode,
+        optionsBuilder: (textEditingValue) {
+          final query = textEditingValue.text.trim().toLowerCase();
+          if (query.isEmpty) {
+            return widget.items.take(10);
+          }
+          return widget.items
+              .where((item) => item.name.toLowerCase().contains(query))
+              .take(10);
+        },
+        onSelected: widget.onSelected,
+        displayStringForOption: (item) => item.name,
+        fieldViewBuilder: (context, fieldController, focusNode, onFieldSubmitted) {
+          return TextField(
+            controller: fieldController,
+            focusNode: focusNode,
+            textCapitalization: TextCapitalization.words,
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => onFieldSubmitted(),
+            decoration: const InputDecoration(
+              labelText: 'Labour work',
+              hintText: 'Search painting, welding…',
+              prefixIcon: Icon(Icons.search_rounded, size: 20, color: AppColors.textMuted),
+            ),
+          );
+        },
+        optionsViewBuilder: (context, onSelected, options) {
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(10),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: fieldWidth, maxHeight: 240),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final item = options.elementAt(index);
+                    return ListTile(
+                      dense: true,
+                      title: Text(item.name),
+                      trailing: Text(
+                        formatAmount(item.defaultRate),
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      onTap: () => onSelected(item),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class PartSearchField extends StatefulWidget {
+  const PartSearchField({
+    super.key,
+    required this.controller,
+    required this.items,
+    required this.onSelected,
+    this.onChanged,
+    this.width = 260,
+  });
+
+  final TextEditingController controller;
+  final List<StockItem> items;
+  final ValueChanged<StockItem> onSelected;
+  final ValueChanged<String>? onChanged;
+  final double width;
+
+  @override
+  State<PartSearchField> createState() => _PartSearchFieldState();
+}
+
+class _PartSearchFieldState extends State<PartSearchField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fieldWidth = AppBreakpoints.fieldWidth(context, widget.width);
+    return SizedBox(
+      width: fieldWidth,
+      child: RawAutocomplete<StockItem>(
+        textEditingController: widget.controller,
+        focusNode: _focusNode,
+        optionsBuilder: (textEditingValue) {
+          final query = textEditingValue.text.trim().toLowerCase();
+          if (query.isEmpty) {
+            return widget.items.take(10);
+          }
+          return widget.items
+              .where(
+                (item) =>
+                    item.name.toLowerCase().contains(query) ||
+                    item.sku.toLowerCase().contains(query),
+              )
+              .take(10);
+        },
+        onSelected: widget.onSelected,
+        displayStringForOption: (item) => item.name,
+        fieldViewBuilder: (context, fieldController, focusNode, onFieldSubmitted) {
+          return TextField(
+            controller: fieldController,
+            focusNode: focusNode,
+            textCapitalization: TextCapitalization.characters,
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => onFieldSubmitted(),
+            decoration: const InputDecoration(
+              labelText: 'Part',
+              hintText: 'Search part name or SKU…',
+              prefixIcon: Icon(Icons.search_rounded, size: 20, color: AppColors.textMuted),
+            ),
+          );
+        },
+        optionsViewBuilder: (context, onSelected, options) {
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(10),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: fieldWidth, maxHeight: 240),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final item = options.elementAt(index);
+                    return ListTile(
+                      dense: true,
+                      title: Text(item.name),
+                      subtitle: Text('SKU ${item.sku} · Stock ${item.currentStock}'),
+                      trailing: Text(
+                        formatAmount(item.sellingPrice),
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      onTap: () => onSelected(item),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class VehicleSearchField extends StatefulWidget {
+  const VehicleSearchField({
+    super.key,
+    required this.controller,
+    required this.optionsBuilder,
+    required this.customerName,
+    required this.customerMobile,
+    required this.onSelected,
+    this.onChanged,
+    this.expand = false,
+    this.width = 320,
+    this.headerStyle = false,
+    this.hint,
+  });
+
+  final TextEditingController controller;
+  final Iterable<Vehicle> Function(String query) optionsBuilder;
+  final String Function(String customerId) customerName;
+  final String Function(String customerId) customerMobile;
+  final ValueChanged<Vehicle> onSelected;
+  final ValueChanged<String>? onChanged;
+  final bool expand;
+  final double width;
+  final bool headerStyle;
+  final String? hint;
+
+  @override
+  State<VehicleSearchField> createState() => _VehicleSearchFieldState();
+}
+
+class _VehicleSearchFieldState extends State<VehicleSearchField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final useFullWidth = widget.expand || AppBreakpoints.isMobile(context);
+    final fieldWidth = useFullWidth
+        ? double.infinity
+        : AppBreakpoints.fieldWidth(context, widget.width);
+    return SizedBox(
+      width: fieldWidth,
+      child: RawAutocomplete<Vehicle>(
+        textEditingController: widget.controller,
+        focusNode: _focusNode,
+        optionsBuilder: (textEditingValue) {
+          return widget.optionsBuilder(textEditingValue.text).take(10);
+        },
+        onSelected: widget.onSelected,
+        displayStringForOption: (vehicle) => vehicle.regNumber,
+        fieldViewBuilder: (context, fieldController, focusNode, onFieldSubmitted) {
+          final hintText = widget.hint ??
+              (widget.headerStyle
+                  ? 'Search vehicle / mobile / name'
+                  : 'Search KL60K3139, mobile, or name…');
+          return TextField(
+            controller: fieldController,
+            focusNode: focusNode,
+            textCapitalization: TextCapitalization.characters,
+            style: const TextStyle(fontSize: 14),
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => onFieldSubmitted(),
+            decoration: widget.headerStyle
+                ? InputDecoration(
+                    hintText: hintText,
+                    filled: true,
+                    fillColor: AppColors.background,
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: AppColors.primary,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: AppColors.primaryLight,
+                        width: 1.5,
+                      ),
+                    ),
+                  )
+                : InputDecoration(
+                    labelText: 'Vehicle / mobile / owner',
+                    hintText: hintText,
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+          );
+        },
+        optionsViewBuilder: (context, onSelected, options) {
+          if (options.isEmpty) {
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(10),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: fieldWidth),
+                  child: const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'No matching vehicles. Add party under Party first.',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(10),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: fieldWidth, maxHeight: 280),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final vehicle = options.elementAt(index);
+                    final owner = widget.customerName(vehicle.customerId);
+                    final mobile = widget.customerMobile(vehicle.customerId);
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                        child: const Icon(
+                          Icons.directions_car_filled_rounded,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      title: Text(
+                        vehicle.regNumber,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        '$owner · $mobile\n'
+                        '${vehicle.brand} ${vehicle.model}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      isThreeLine: true,
+                      onTap: () => onSelected(vehicle),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class PartySearchField extends StatefulWidget {
+  const PartySearchField({
+    super.key,
+    required this.controller,
+    required this.optionsBuilder,
+    required this.onSelected,
+    this.onChanged,
+    this.expand = false,
+    this.width = 320,
+  });
+
+  final TextEditingController controller;
+  final Iterable<Customer> Function(String query) optionsBuilder;
+  final ValueChanged<Customer> onSelected;
+  final ValueChanged<String>? onChanged;
+  final bool expand;
+  final double width;
+
+  @override
+  State<PartySearchField> createState() => _PartySearchFieldState();
+}
+
+class _PartySearchFieldState extends State<PartySearchField> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final useFullWidth = widget.expand || AppBreakpoints.isMobile(context);
+    final fieldWidth = useFullWidth
+        ? double.infinity
+        : AppBreakpoints.fieldWidth(context, widget.width);
+    return SizedBox(
+      width: fieldWidth,
+      child: RawAutocomplete<Customer>(
+        textEditingController: widget.controller,
+        focusNode: _focusNode,
+        optionsBuilder: (textEditingValue) {
+          return widget.optionsBuilder(textEditingValue.text).take(10);
+        },
+        onSelected: widget.onSelected,
+        displayStringForOption: (customer) => customer.name,
+        fieldViewBuilder: (context, fieldController, focusNode, onFieldSubmitted) {
+          return TextField(
+            controller: fieldController,
+            focusNode: focusNode,
+            textCapitalization: TextCapitalization.words,
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => onFieldSubmitted(),
+            decoration: const InputDecoration(
+              labelText: 'Party / owner name *',
+              hintText: 'Search name or mobile…',
+              prefixIcon: Icon(
+                Icons.person_search_rounded,
+                size: 20,
+                color: AppColors.textMuted,
+              ),
+            ),
+          );
+        },
+        optionsViewBuilder: (context, onSelected, options) {
+          if (options.isEmpty) {
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(10),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: fieldWidth),
+                  child: const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'No matching parties. Add customer under Step 1 first.',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(10),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: fieldWidth, maxHeight: 280),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final customer = options.elementAt(index);
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                        child: const Icon(
+                          Icons.person_rounded,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      title: Text(
+                        customer.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        '${customer.mobile}\n${customer.address}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      isThreeLine: true,
+                      onTap: () => onSelected(customer),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

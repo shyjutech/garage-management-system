@@ -3,10 +3,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
+import 'package:garage_management_system/src/pages/job_cards_page.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
 import 'package:garage_management_system/src/utils/garage_utils.dart';
+import 'package:garage_management_system/src/utils/browser_cache_clearer.dart';
+import 'package:garage_management_system/src/widgets/estimate_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/ui_components.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
 import 'package:intl/intl.dart';
@@ -14,12 +17,14 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppSection {
   dashboard,
   parties,
   history,
   stock,
+  labour,
   jobCards,
   estimates,
   invoices,
@@ -45,6 +50,7 @@ class _HomeShellState extends State<HomeShell> {
     (AppSection.parties, Icons.people_rounded, 'Party'),
     (AppSection.history, Icons.history_rounded, 'History'),
     (AppSection.stock, Icons.inventory_2_rounded, 'Stock'),
+    (AppSection.labour, Icons.handyman_rounded, 'Labour'),
     (AppSection.jobCards, Icons.build_circle_rounded, 'Job Cards'),
     (AppSection.estimates, Icons.request_quote_rounded, 'Estimates'),
     (AppSection.invoices, Icons.receipt_long_rounded, 'Invoices'),
@@ -176,34 +182,24 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  Widget _buildSearchChips(List<Vehicle> searchResults) {
-    if (globalSearchController.text.trim().isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        AppBreakpoints.isMobile(context) ? 12 : 28,
-        12,
-        AppBreakpoints.isMobile(context) ? 12 : 28,
-        0,
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: searchResults
-            .map(
-              (vehicle) => ActionChip(
-                avatar: const Icon(Icons.directions_car, size: 18),
-                label: Text(vehicle.regNumber),
-                onPressed: () {
-                  highlightedVehicle = vehicle;
-                  globalSearchController.clear();
-                  setState(() => section = AppSection.history);
-                },
-              ),
-            )
-            .toList(),
-      ),
+  void _openVehicleHistory(Vehicle vehicle) {
+    setState(() {
+      highlightedVehicle = vehicle;
+      globalSearchController.text = vehicle.regNumber;
+      section = AppSection.history;
+    });
+    _closeDrawer();
+  }
+
+  Widget _buildGlobalVehicleSearch(GarageStore store, {required bool expand}) {
+    return VehicleSearchField(
+      controller: globalSearchController,
+      expand: expand,
+      headerStyle: true,
+      optionsBuilder: store.searchVehicles,
+      customerName: store.customerName,
+      customerMobile: store.customerMobile,
+      onSelected: _openVehicleHistory,
     );
   }
 
@@ -219,21 +215,32 @@ class _HomeShellState extends State<HomeShell> {
     };
   }
 
+  void _goToJobCards() {
+    _selectSection(AppSection.jobCards);
+  }
+
+  void _goToEstimates() {
+    _selectSection(AppSection.estimates);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <AppSection, Widget>{
-      AppSection.dashboard: const DashboardPage(),
+      AppSection.dashboard: DashboardPage(
+        onJobCardCreated: (_) => _goToJobCards(),
+        onOpenJobCards: _goToJobCards,
+        onOpenEstimates: _goToEstimates,
+      ),
       AppSection.parties: const PartiesPage(),
       AppSection.history: const VehicleHistoryPage(),
       AppSection.stock: const StockPage(),
-      AppSection.jobCards: const JobCardsPage(),
+      AppSection.labour: const LabourPage(),
+      AppSection.jobCards: JobCardsPage(onEstimateSaved: _goToEstimates),
       AppSection.estimates: const EstimatesPage(),
       AppSection.invoices: const InvoicesPage(),
       AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
-    final searchResults =
-        store.searchVehicles(globalSearchController.text).take(5).toList();
     final compact = AppBreakpoints.isCompact(context);
     final currentTitle = navItems.firstWhere((n) => n.$1 == section).$3;
 
@@ -267,13 +274,8 @@ class _HomeShellState extends State<HomeShell> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: AppSearchField(
-                  controller: globalSearchController,
-                  onChanged: (_) => setState(() {}),
-                  expand: true,
-                ),
+                child: _buildGlobalVehicleSearch(store, expand: true),
               ),
-              _buildSearchChips(searchResults),
               Expanded(
                 child: Padding(
                   padding: AppBreakpoints.pagePadding(context),
@@ -334,14 +336,10 @@ class _HomeShellState extends State<HomeShell> {
                         ),
                       ),
                       const SizedBox(width: 16),
-                      AppSearchField(
-                        controller: globalSearchController,
-                        onChanged: (_) => setState(() {}),
-                      ),
+                      _buildGlobalVehicleSearch(store, expand: false),
                     ],
                   ),
                 ),
-                _buildSearchChips(searchResults),
                 Expanded(
                   child: Padding(
                     padding: AppBreakpoints.pagePadding(context),
@@ -358,7 +356,16 @@ class _HomeShellState extends State<HomeShell> {
 }
 
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  const DashboardPage({
+    super.key,
+    this.onJobCardCreated,
+    this.onOpenJobCards,
+    this.onOpenEstimates,
+  });
+
+  final void Function(String jobCardId)? onJobCardCreated;
+  final VoidCallback? onOpenJobCards;
+  final VoidCallback? onOpenEstimates;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -381,11 +388,11 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
-  void _lookupVehicle(GarageStore store) {
-    final vehicle = store.findVehicleByRegNumber(regNumber.text);
+  void _selectVehicle(Vehicle vehicle) {
     setState(() {
       matchedVehicle = vehicle;
-      if (vehicle != null && km.text.trim().isEmpty) {
+      regNumber.text = vehicle.regNumber;
+      if (km.text.trim().isEmpty) {
         km.text = vehicle.lastKmReading.toString();
       }
     });
@@ -393,17 +400,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _createQuickJobCard(GarageStore store) async {
     if (matchedVehicle == null) {
-      _lookupVehicle(store);
-      if (matchedVehicle == null) {
-        showAppSnackBar(
-          context,
-          'Vehicle not found. Add party and vehicle first.',
-        );
-        return;
-      }
+      showAppSnackBar(
+        context,
+        'Select a vehicle from the search list.',
+      );
+      return;
     }
-
-    final vehicle = matchedVehicle!;
     final kmError = FormValidators.positiveKm(km.text);
     final mechanicError = FormValidators.requiredText(mechanic.text, 'Mechanic');
     final complaintError =
@@ -413,6 +415,8 @@ class _DashboardPageState extends State<DashboardPage> {
       showAppSnackBar(context, error);
       return;
     }
+
+    final vehicle = matchedVehicle!;
 
     final card = await store.addJobCard(
       customerId: vehicle.customerId,
@@ -436,10 +440,21 @@ class _DashboardPageState extends State<DashboardPage> {
 
     complaints.clear();
     mechanic.clear();
-    showAppSnackBar(
-      context,
-      'Job card #${card.jobCardNumber} created',
-      backgroundColor: AppColors.success,
+    regNumber.clear();
+    setState(() => matchedVehicle = null);
+
+    widget.onJobCardCreated?.call(card.id);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Job card #${card.jobCardNumber} created — add labour & parts next',
+        ),
+        backgroundColor: AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
     );
   }
 
@@ -479,34 +494,22 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const PageHeader(
-            title: 'Operations Overview',
-            subtitle: 'Daily sales, workshop load, and payment status',
-            icon: Icons.dashboard_rounded,
-          ),
           SectionCard(
             title: 'Quick Job Card',
             icon: Icons.build_circle_rounded,
-            subtitle: 'Enter vehicle number and open a job card immediately',
+            subtitle:
+                'New customer? Add them under Party first, then start a job here',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                AppFormRow(
-                  children: [
-                    AppTextField(
-                      controller: regNumber,
-                      label: 'Vehicle Number *',
-                      expand: true,
-                      textCapitalization: TextCapitalization.characters,
-                      hint: 'e.g. KL60K3139',
-                      onChanged: (_) => _lookupVehicle(store),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: () => _lookupVehicle(store),
-                      icon: const Icon(Icons.search_rounded, size: 20),
-                      label: const Text('Find'),
-                    ),
-                  ],
+                VehicleSearchField(
+                  controller: regNumber,
+                  expand: true,
+                  optionsBuilder: store.searchVehicles,
+                  customerName: store.customerName,
+                  customerMobile: store.customerMobile,
+                  onSelected: _selectVehicle,
+                  onChanged: (_) => setState(() => matchedVehicle = null),
                 ),
                 if (matchedVehicle != null) ...[
                   const SizedBox(height: 12),
@@ -588,8 +591,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 ] else if (regNumber.text.trim().isNotEmpty) ...[
                   const SizedBox(height: 12),
                   const Text(
-                    'Vehicle not found. Register the party and vehicle under Party first.',
-                    style: TextStyle(color: AppColors.warning, fontSize: 13),
+                    'Pick a vehicle from the search results above.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                 ],
               ],
@@ -621,11 +624,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 label: 'Job Cards Today',
                 value: '${store.todayJobCards}',
                 icon: Icons.assignment_rounded,
+                onTap: widget.onOpenJobCards,
               ),
               MetricCard(
-                label: 'Vehicles In Service',
+                label: 'Live Job Cards',
                 value: '${store.activeJobCards}',
-                icon: Icons.car_repair_rounded,
+                icon: Icons.build_circle_rounded,
+                accentColor: AppColors.primary,
+                onTap: widget.onOpenJobCards,
               ),
               MetricCard(
                 label: 'Low Stock Alerts',
@@ -650,6 +656,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 value: '${store.openEstimates}',
                 icon: Icons.request_quote_rounded,
                 accentColor: AppColors.primaryLight,
+                onTap: widget.onOpenEstimates,
               ),
             ],
           ),
@@ -692,22 +699,22 @@ class _PartiesPageState extends State<PartiesPage> {
   final mobile = TextEditingController();
   final address = TextEditingController();
   String? selectedCustomerId;
+  final partySearch = TextEditingController();
   final regNumber = TextEditingController();
   final brand = TextEditingController();
   final model = TextEditingController();
   final year = TextEditingController();
-  final km = TextEditingController();
 
   @override
   void dispose() {
     customerName.dispose();
     mobile.dispose();
     address.dispose();
+    partySearch.dispose();
     regNumber.dispose();
     brand.dispose();
     model.dispose();
     year.dispose();
-    km.dispose();
     super.dispose();
   }
 
@@ -737,13 +744,23 @@ class _PartiesPageState extends State<PartiesPage> {
     }
   }
 
+  void _selectParty(Customer customer) {
+    setState(() {
+      selectedCustomerId = customer.id;
+      partySearch.text = customer.name;
+    });
+  }
+
   Future<void> _addVehicle(GarageStore store) async {
+    if (selectedCustomerId == null) {
+      showAppSnackBar(context, 'Select a party from the search list.');
+      return;
+    }
     final regError = FormValidators.vehicleNumber(regNumber.text);
     final brandError = FormValidators.requiredText(brand.text, 'Brand');
     final modelError = FormValidators.requiredText(model.text, 'Model');
     final yearError = FormValidators.vehicleYear(year.text);
-    final kmError = FormValidators.positiveKm(km.text);
-    final error = regError ?? brandError ?? modelError ?? yearError ?? kmError;
+    final error = regError ?? brandError ?? modelError ?? yearError;
     if (error != null) {
       showAppSnackBar(context, error);
       return;
@@ -754,13 +771,12 @@ class _PartiesPageState extends State<PartiesPage> {
       brand: brand.text.trim(),
       model: model.text.trim(),
       year: int.parse(year.text.trim()),
-      lastKm: int.parse(km.text.trim()),
+      lastKm: 0,
     );
     regNumber.clear();
     brand.clear();
     model.clear();
     year.clear();
-    km.clear();
     if (context.mounted) {
       showAppSnackBar(
         context,
@@ -775,23 +791,28 @@ class _PartiesPageState extends State<PartiesPage> {
     final store = context.watch<GarageStore>();
     if (store.customers.isEmpty) {
       selectedCustomerId = null;
+      partySearch.clear();
     } else if (selectedCustomerId == null ||
         !store.customers.any((customer) => customer.id == selectedCustomerId)) {
-      selectedCustomerId = store.customers.first.id;
+      final first = store.customers.first;
+      selectedCustomerId = first.id;
+      if (partySearch.text != first.name) {
+        partySearch.text = first.name;
+      }
     }
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const PageHeader(
-            title: 'Party Management',
-            subtitle: 'Customers and linked vehicles',
+            title: 'Party',
+            subtitle: 'New customer? Add name & mobile, then add their vehicle',
             icon: Icons.people_rounded,
           ),
           SectionCard(
-            title: 'Add Party',
+            title: 'Step 1 — Add Customer',
             icon: Icons.person_add_rounded,
-            subtitle: 'Customer name, mobile, and address',
+            subtitle: 'Owner name, 10-digit mobile, and address',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -834,9 +855,9 @@ class _PartiesPageState extends State<PartiesPage> {
           ),
           const SizedBox(height: 16),
           SectionCard(
-            title: 'Add Vehicle',
+            title: 'Step 2 — Add Vehicle',
             icon: Icons.directions_car_rounded,
-            subtitle: 'Link a vehicle to an existing party',
+            subtitle: 'Select customer above, then enter vehicle details',
             child: store.customers.isEmpty
                 ? Container(
                     width: double.infinity,
@@ -862,25 +883,12 @@ class _PartiesPageState extends State<PartiesPage> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      AppDropdownField<String>(
-                        label: 'Party *',
-                        icon: Icons.person_outline,
-                        value: selectedCustomerId,
-                        hint: 'Select party',
-                        items: store.customers
-                            .map(
-                              (customer) => DropdownMenuItem(
-                                value: customer.id,
-                                child: Text(
-                                  '${customer.name} · ${customer.mobile}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) => setState(() {
-                          selectedCustomerId = value;
-                        }),
+                      PartySearchField(
+                        controller: partySearch,
+                        expand: true,
+                        optionsBuilder: store.searchCustomers,
+                        onSelected: _selectParty,
+                        onChanged: (_) => setState(() => selectedCustomerId = null),
                       ),
                       const SizedBox(height: 12),
                       AppFormRow(
@@ -907,25 +915,13 @@ class _PartiesPageState extends State<PartiesPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      AppFormRow(
-                        children: [
-                          AppTextField(
-                            controller: year,
-                            label: 'Year *',
-                            expand: true,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            hint: 'e.g. 2016',
-                          ),
-                          AppTextField(
-                            controller: km,
-                            label: 'KM Reading *',
-                            expand: true,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            hint: 'Current odometer',
-                          ),
-                        ],
+                      AppTextField(
+                        controller: year,
+                        label: 'Year *',
+                        expand: true,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        hint: 'e.g. 2016',
                       ),
                       AppFormActions(
                         primary: FilledButton.icon(
@@ -1002,122 +998,582 @@ class _VehicleHistoryPageState extends State<VehicleHistoryPage> {
   @override
   void initState() {
     super.initState();
-    selectedVehicle = widget.preSelectedVehicle;
-    if (selectedVehicle != null) {
-      searchController.text = selectedVehicle!.regNumber;
+    _applyPreselectedVehicle(widget.preSelectedVehicle);
+  }
+
+  @override
+  void didUpdateWidget(covariant VehicleHistoryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.preSelectedVehicle?.id != oldWidget.preSelectedVehicle?.id) {
+      _applyPreselectedVehicle(widget.preSelectedVehicle);
     }
+  }
+
+  void _applyPreselectedVehicle(Vehicle? vehicle) {
+    selectedVehicle = vehicle;
+    if (vehicle != null) {
+      searchController.text = vehicle.regNumber;
+    }
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  void _selectVehicle(Vehicle vehicle) {
+    setState(() {
+      selectedVehicle = vehicle;
+      searchController.text = vehicle.regNumber;
+    });
+  }
+
+  Widget _historyLineItem({
+    required String title,
+    String? subtitle,
+    required String amount,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Text(
+            amount,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInvoiceCard(GarageStore store, Invoice invoice) {
+    final jobCard = invoice.jobCardId == null
+        ? null
+        : store.jobCards
+            .where((item) => item.id == invoice.jobCardId)
+            .firstOrNull;
+    final isPaid = invoice.paymentStatus == PaymentStatus.paid;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Invoice #${invoice.invoiceNumber}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        DateFormat('dd MMM yyyy').format(invoice.createdAt),
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 13,
+                        ),
+                      ),
+                      if (invoice.kmReading > 0) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'KM: ${invoice.kmReading}',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Text(
+                        '${invoice.paymentStatus.label} · '
+                        'Paid ${formatAmount(invoice.amountPaid)} · '
+                        'Balance ${formatAmount(invoice.balanceAmount)}',
+                        style: TextStyle(
+                          color: isPaid ? AppColors.success : AppColors.warning,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      formatAmount(invoice.grandTotal),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await Printing.layoutPdf(
+                          onLayout: (format) => buildInvoicePdf(
+                            invoice: invoice,
+                            store: store,
+                            format: format,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                      label: const Text('Print'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (jobCard != null &&
+                (jobCard.customerComplaints.isNotEmpty ||
+                    jobCard.mechanicName.isNotEmpty)) ...[
+              const Divider(height: 24),
+              const Text(
+                'Job details',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+              if (jobCard.mechanicName.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Mechanic: ${jobCard.mechanicName}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              if (jobCard.customerComplaints.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Complaint: ${jobCard.customerComplaints}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textMuted,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+            ],
+            if (invoice.labourItems.isNotEmpty) ...[
+              const Divider(height: 24),
+              const Text(
+                'Labour / works done',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ...invoice.labourItems.map(
+                (line) => _historyLineItem(
+                  title: line.description,
+                  amount: formatAmount(line.amount),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Labour total: ${formatAmount(invoice.labourTotal)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+            if (invoice.partsItems.isNotEmpty) ...[
+              const Divider(height: 24),
+              const Text(
+                'Parts used',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ...invoice.partsItems.map(
+                (line) => _historyLineItem(
+                  title: line.name,
+                  subtitle: 'Qty ${line.qty} × ${formatAmount(line.unitPrice)}',
+                  amount: formatAmount(line.amount),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Parts total: ${formatAmount(invoice.partsTotal)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
-    final results = store.searchVehicles(searchController.text);
     final invoices = selectedVehicle == null
         ? const <Invoice>[]
         : store.invoicesByVehicle(selectedVehicle!.id);
-    final estimates = selectedVehicle == null
-        ? const <Estimate>[]
-        : store.estimatesByVehicle(selectedVehicle!.id);
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const PageHeader(
             title: 'Vehicle History',
-            subtitle: 'Past services, bills, and KM readings',
+            subtitle: 'Past bills and work done for a vehicle',
             icon: Icons.history_rounded,
           ),
-          AppSearchField(
+          VehicleSearchField(
             controller: searchController,
-            hint: 'Search by vehicle number / mobile / customer',
+            expand: true,
             width: 420,
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: results
-                .take(8)
-                .map(
-                  (vehicle) => ActionChip(
-                    avatar: const Icon(Icons.directions_car, size: 18),
-                    label: Text(vehicle.regNumber),
-                    onPressed: () => setState(() => selectedVehicle = vehicle),
-                  ),
-                )
-                .toList(),
+            optionsBuilder: store.searchVehicles,
+            customerName: store.customerName,
+            customerMobile: store.customerMobile,
+            onSelected: _selectVehicle,
           ),
           const SizedBox(height: 16),
-          if (selectedVehicle != null)
+          if (selectedVehicle == null)
+            const SectionCard(
+              title: 'Select a vehicle',
+              icon: Icons.directions_car_outlined,
+              child: Text(
+                'Search by vehicle number, mobile, or customer name above.',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+            )
+          else ...[
             SectionCard(
-              title: '${selectedVehicle!.regNumber} · ${selectedVehicle!.brand} ${selectedVehicle!.model}',
+              title:
+                  '${selectedVehicle!.regNumber} · ${selectedVehicle!.brand} ${selectedVehicle!.model}',
               icon: Icons.directions_car_filled_rounded,
-              child: Column(
-                children: [
-                  if (invoices.isEmpty && estimates.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(12),
+              subtitle:
+                  '${store.customerName(selectedVehicle!.customerId)} · '
+                  '${store.customerMobile(selectedVehicle!.customerId)}',
+              child: invoices.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
                       child: Text(
-                        'No history found for this vehicle yet.',
+                        'No invoices yet for this vehicle.',
                         style: TextStyle(color: AppColors.textMuted),
                       ),
-                    ),
-                  if (estimates.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        'Estimates',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ),
-                    ...estimates.map(
-                      (estimate) => DataListTile(
-                        title: 'Estimate #${estimate.estimateNumber}',
-                        subtitle:
-                            '${estimate.status.label} · ${DateFormat('dd-MM-yyyy').format(estimate.createdAt)}',
-                        trailing: Text(
-                          formatAmount(estimate.grandTotal),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '${invoices.length} invoice${invoices.length == 1 ? '' : 's'} · newest first',
                           style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
+                            color: AppColors.textMuted,
+                            fontSize: 13,
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (invoices.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        'Invoices',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
+                        const SizedBox(height: 12),
+                        ...invoices.map(
+                          (invoice) => _buildInvoiceCard(store, invoice),
                         ),
-                      ),
+                      ],
                     ),
-                    ...invoices.map(
-                      (invoice) => DataListTile(
-                        title: 'Invoice #${invoice.invoiceNumber}',
-                        subtitle:
-                            'Date: ${DateFormat('dd-MM-yyyy').format(invoice.createdAt)} · KM: ${invoice.kmReading}',
-                        trailing: Text(
-                          formatAmount(invoice.grandTotal),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class LabourPage extends StatefulWidget {
+  const LabourPage({super.key});
+
+  @override
+  State<LabourPage> createState() => _LabourPageState();
+}
+
+class _LabourPageState extends State<LabourPage> {
+  final name = TextEditingController();
+  final defaultRate = TextEditingController();
+
+  @override
+  void dispose() {
+    name.dispose();
+    defaultRate.dispose();
+    super.dispose();
+  }
+
+  Future<void> _showEditLabourDialog(GarageStore store, LabourItem item) async {
+    final editName = TextEditingController(text: item.name);
+    final editRate =
+        TextEditingController(text: item.defaultRate.toStringAsFixed(0));
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit Labour Work'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppTextField(controller: editName, label: 'Work Name *', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editRate,
+                label: 'Default Rate (₹) *',
+                expand: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true) {
+      editName.dispose();
+      editRate.dispose();
+      return;
+    }
+
+    final nameError = FormValidators.requiredText(editName.text, 'Work name');
+    final rateValue = double.tryParse(editRate.text.trim());
+    final error = nameError ??
+        (rateValue == null || rateValue < 0
+            ? 'Default rate must be a valid number'
+            : null);
+
+    final trimmedName = editName.text.trim();
+    editName.dispose();
+    editRate.dispose();
+
+    if (error != null) {
+      if (mounted) {
+        showAppSnackBar(context, error);
+      }
+      return;
+    }
+
+    final ok = await store.updateLabourItem(
+      item.copyWith(name: trimmedName, defaultRate: rateValue!),
+    );
+
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not update labour work');
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Labour work updated',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _confirmDeleteLabour(GarageStore store, LabourItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete labour work?'),
+        content: Text('Remove "${item.name}" from the labour catalog?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final ok = await store.deleteLabourItem(item.id);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not delete labour work');
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Labour work deleted',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<GarageStore>();
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const PageHeader(
+            title: 'Labour Works',
+            subtitle: 'Common jobs used when building estimates',
+            icon: Icons.handyman_rounded,
+          ),
+          SectionCard(
+            title: 'Add Labour Work',
+            icon: Icons.add_box_rounded,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                AppTextField(
+                  controller: name,
+                  label: 'Work Name',
+                  hint: 'e.g. Painting, Welding',
+                ),
+                AppTextField(
+                  controller: defaultRate,
+                  label: 'Default Rate (₹)',
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final nameError =
+                        FormValidators.requiredText(name.text, 'Work name');
+                    final rate = double.tryParse(defaultRate.text.trim());
+                    if (nameError != null) {
+                      showAppSnackBar(context, nameError);
+                      return;
+                    }
+                    if (rate == null || rate < 0) {
+                      showAppSnackBar(context, 'Enter a valid default rate');
+                      return;
+                    }
+                    final item = await store.addLabourItem(
+                      name: name.text.trim(),
+                      defaultRate: rate,
+                    );
+                    if (!context.mounted) return;
+                    if (item == null) {
+                      showAppSnackBar(
+                        context,
+                        store.lastError ?? 'Could not add labour work',
+                      );
+                      return;
+                    }
+                    name.clear();
+                    defaultRate.clear();
+                    showAppSnackBar(
+                      context,
+                      'Labour work added',
+                      backgroundColor: AppColors.success,
+                    );
+                  },
+                  child: const Text('Add Work'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          SectionCard(
+            title: 'Labour Catalog',
+            icon: Icons.list_alt_rounded,
+            child: store.labourItems.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No labour works yet. Add painting, welding, service, etc.',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
+                  )
+                : Column(
+                    children: store.labourItems.map((item) {
+                      return DataListTile(
+                        title: item.name,
+                        subtitle: 'Default rate for estimates',
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              formatAmount(item.defaultRate),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Edit',
+                              onPressed: () => _showEditLabourDialog(store, item),
+                              icon: const Icon(Icons.edit_outlined, size: 20),
+                            ),
+                            IconButton(
+                              tooltip: 'Delete',
+                              onPressed: () => _confirmDeleteLabour(store, item),
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 20,
+                                color: AppColors.warning,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+          ),
         ],
       ),
     );
@@ -1415,471 +1871,6 @@ class _StockPageState extends State<StockPage> {
   }
 }
 
-class JobCardsPage extends StatefulWidget {
-  const JobCardsPage({super.key});
-
-  @override
-  State<JobCardsPage> createState() => _JobCardsPageState();
-}
-
-class _JobCardsPageState extends State<JobCardsPage> {
-  String? customerId;
-  String? vehicleId;
-  String fuelLevel = 'Half';
-  final km = TextEditingController();
-  final customerVoice = TextEditingController();
-  final observations = TextEditingController();
-  final requestedWorks = TextEditingController();
-  final otherNotes = TextEditingController();
-  final internalNotes = TextEditingController();
-  final mechanic = TextEditingController();
-  final complaintLineInput = TextEditingController();
-  final deliveryDate = TextEditingController();
-  final deliveryTime = TextEditingController();
-  final complaintItems = <String>[];
-
-  @override
-  void dispose() {
-    km.dispose();
-    customerVoice.dispose();
-    observations.dispose();
-    requestedWorks.dispose();
-    otherNotes.dispose();
-    internalNotes.dispose();
-    mechanic.dispose();
-    complaintLineInput.dispose();
-    deliveryDate.dispose();
-    deliveryTime.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final store = context.watch<GarageStore>();
-    customerId ??= store.customers.isNotEmpty ? store.customers.first.id : null;
-    final customerVehicles = store.vehicles
-        .where((vehicle) => vehicle.customerId == customerId)
-        .toList();
-    if (vehicleId == null && customerVehicles.isNotEmpty) {
-      vehicleId = customerVehicles.first.id;
-    }
-
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const PageHeader(
-            title: 'Job Cards',
-            subtitle: 'Track complaints, mechanics, and service status',
-            icon: Icons.build_circle_rounded,
-          ),
-          SectionCard(
-            title: 'New Job Card',
-            icon: Icons.note_add_rounded,
-            subtitle: 'Match your paper job card — write full complaints, not one line',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    DropdownButton<String>(
-                      value: customerId,
-                      hint: const Text('Party'),
-                      items: store.customers
-                          .map(
-                            (customer) => DropdownMenuItem(
-                              value: customer.id,
-                              child: Text(customer.name),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setState(() {
-                        customerId = value;
-                        vehicleId = null;
-                      }),
-                    ),
-                    DropdownButton<String>(
-                      value: vehicleId,
-                      hint: const Text('Vehicle'),
-                      items: customerVehicles
-                          .map(
-                            (vehicle) => DropdownMenuItem(
-                              value: vehicle.id,
-                              child: Text(vehicle.regNumber),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setState(() {
-                        vehicleId = value;
-                      }),
-                    ),
-                    AppTextField(controller: km, label: 'KM Reading *', width: 140, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
-                    DropdownButton<String>(
-                      value: fuelLevel,
-                      items: const [
-                        DropdownMenuItem(value: 'Empty', child: Text('Fuel: Empty')),
-                        DropdownMenuItem(value: 'Quarter', child: Text('Fuel: 1/4')),
-                        DropdownMenuItem(value: 'Half', child: Text('Fuel: 1/2')),
-                        DropdownMenuItem(value: 'Three Quarter', child: Text('Fuel: 3/4')),
-                        DropdownMenuItem(value: 'Full', child: Text('Fuel: Full')),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() => fuelLevel = value);
-                      },
-                    ),
-                    AppTextField(controller: mechanic, label: 'Mechanic *', width: 160),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final useColumns = constraints.maxWidth > 900;
-                    final customerField = AppMultilineField(
-                      controller: customerVoice,
-                      label: 'Customer Voice / Complaints',
-                      hint:
-                          'What the customer reported...\ne.g. Engine noise\nAC not cooling\nBrake sound',
-                      minLines: 5,
-                      maxLines: 10,
-                    );
-                    final observationsField = AppMultilineField(
-                      controller: observations,
-                      label: 'Observations',
-                      hint: 'Mechanic findings after inspection...',
-                      minLines: 5,
-                      maxLines: 10,
-                    );
-                    final requestedField = AppMultilineField(
-                      controller: requestedWorks,
-                      label: 'Requested Works',
-                      hint: 'Works customer asked for...',
-                      minLines: 5,
-                      maxLines: 10,
-                    );
-                    if (useColumns) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: customerField),
-                          const SizedBox(width: 12),
-                          Expanded(child: observationsField),
-                          const SizedBox(width: 12),
-                          Expanded(child: requestedField),
-                        ],
-                      );
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        customerField,
-                        const SizedBox(height: 12),
-                        observationsField,
-                        const SizedBox(height: 12),
-                        requestedField,
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Complaint checklist (add one line at a time)',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    AppTextField(
-                      controller: complaintLineInput,
-                      label: 'Add complaint line',
-                      width: 320,
-                      icon: Icons.report_problem_outlined,
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        final line = complaintLineInput.text.trim();
-                        if (line.isEmpty) return;
-                        setState(() {
-                          complaintItems.add(line);
-                          complaintLineInput.clear();
-                        });
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Line'),
-                    ),
-                  ],
-                ),
-                if (complaintItems.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: complaintItems.asMap().entries.map((entry) {
-                      return InputChip(
-                        label: Text('${entry.key + 1}. ${entry.value}'),
-                        onDeleted: () {
-                          setState(() => complaintItems.removeAt(entry.key));
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                AppMultilineField(
-                  controller: otherNotes,
-                  label: 'Other Information',
-                  hint: 'Insurance, warranty, outside work, etc.',
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 12),
-                AppMultilineField(
-                  controller: internalNotes,
-                  label: 'Internal Notes (staff only)',
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    AppTextField(
-                      controller: deliveryDate,
-                      label: 'Delivery Date (DD-MM-YYYY)',
-                      width: 200,
-                    ),
-                    AppTextField(
-                      controller: deliveryTime,
-                      label: 'Delivery Time',
-                      width: 140,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: (customerId == null || vehicleId == null)
-                      ? null
-                      : () async {
-                          final kmError = FormValidators.positiveKm(km.text);
-                          final mechanicError =
-                              FormValidators.requiredText(mechanic.text, 'Mechanic');
-                          final error = kmError ?? mechanicError;
-                          if (error != null) {
-                            showAppSnackBar(context, error);
-                            return;
-                          }
-                          if (!_hasAnyComplaintContent()) {
-                            showAppSnackBar(
-                              context,
-                              'Add at least one complaint or work description',
-                            );
-                            return;
-                          }
-                          final card = await store.addJobCard(
-                            customerId: customerId!,
-                            vehicleId: vehicleId!,
-                            kmReading: int.parse(km.text.trim()),
-                            fuelLevel: fuelLevel,
-                            customerComplaints: _buildComplaintsText(),
-                            complaintItems: List.of(complaintItems),
-                            observations: observations.text.trim(),
-                            requestedWorks: requestedWorks.text.trim(),
-                            otherNotes: otherNotes.text.trim(),
-                            internalNotes: internalNotes.text.trim(),
-                            mechanicName: mechanic.text.trim(),
-                            estimatedDelivery: _parseDeliveryDateTime(),
-                          );
-                          if (!context.mounted) return;
-                          if (card == null) {
-                            showAppSnackBar(
-                              context,
-                              store.lastError ?? 'Could not create job card',
-                            );
-                            return;
-                          }
-                          _clearForm();
-                          showAppSnackBar(
-                            context,
-                            'Job card #${card.jobCardNumber} created',
-                            backgroundColor: AppColors.success,
-                          );
-                        },
-                  icon: const Icon(Icons.save_rounded, size: 20),
-                  label: const Text('Create Job Card'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          SectionCard(
-            title: 'Active Job Cards',
-            icon: Icons.list_alt_rounded,
-            child: Column(
-              children: store.jobCards.map(
-                (jobCard) => Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ExpansionTile(
-                    tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                    title: Text(
-                      '#${jobCard.jobCardNumber} · ${store.vehicleNumber(jobCard.vehicleId)}',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      '${jobCard.mechanicName.isEmpty ? "Unassigned" : jobCard.mechanicName} · ${jobCard.status.label}',
-                    ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            DropdownButtonFormField<JobStatus>(
-                              value: jobCard.status,
-                              decoration: const InputDecoration(
-                                labelText: 'Status',
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                              ),
-                              items: JobStatus.values
-                                  .map(
-                                    (status) => DropdownMenuItem(
-                                      value: status,
-                                      child: Text(status.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (value) {
-                                if (value == null) return;
-                                store.updateJobCardStatus(jobCard.id, value);
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            _jobDetailRow('KM', '${jobCard.kmReading}'),
-                            _jobDetailRow('Fuel', jobCard.fuelLevel),
-                            if (jobCard.complaintItems.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              const Text('Complaints', style: TextStyle(fontWeight: FontWeight.w600)),
-                              ...jobCard.complaintItems.map(
-                                (item) => Text('• $item'),
-                              ),
-                            ],
-                            if (jobCard.customerComplaints.isNotEmpty)
-                              _jobDetailBlock('Customer Voice', jobCard.customerComplaints),
-                            if (jobCard.observations.isNotEmpty)
-                              _jobDetailBlock('Observations', jobCard.observations),
-                            if (jobCard.requestedWorks.isNotEmpty)
-                              _jobDetailBlock('Requested Works', jobCard.requestedWorks),
-                            if (jobCard.otherNotes.isNotEmpty)
-                              _jobDetailBlock('Other Info', jobCard.otherNotes),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  bool _hasAnyComplaintContent() {
-    return customerVoice.text.trim().isNotEmpty ||
-        observations.text.trim().isNotEmpty ||
-        requestedWorks.text.trim().isNotEmpty ||
-        complaintItems.isNotEmpty;
-  }
-
-  String _buildComplaintsText() {
-    final parts = <String>[];
-    if (customerVoice.text.trim().isNotEmpty) {
-      parts.add(customerVoice.text.trim());
-    }
-    if (complaintItems.isNotEmpty) {
-      parts.add(complaintItems.map((item) => '• $item').join('\n'));
-    }
-    return parts.join('\n\n');
-  }
-
-  DateTime? _parseDeliveryDateTime() {
-    final dateText = deliveryDate.text.trim();
-    if (dateText.isEmpty) return null;
-    final parsed = DateFormat('dd-MM-yyyy').tryParse(dateText);
-    if (parsed == null) return null;
-    final timeParts = deliveryTime.text.trim().split(':');
-    if (timeParts.length >= 2) {
-      final hour = int.tryParse(timeParts[0]) ?? 0;
-      final minute = int.tryParse(timeParts[1]) ?? 0;
-      return DateTime(parsed.year, parsed.month, parsed.day, hour, minute);
-    }
-    return parsed;
-  }
-
-  void _clearForm() {
-    km.clear();
-    customerVoice.clear();
-    observations.clear();
-    requestedWorks.clear();
-    otherNotes.clear();
-    internalNotes.clear();
-    mechanic.clear();
-    complaintLineInput.clear();
-    deliveryDate.clear();
-    deliveryTime.clear();
-    setState(() => complaintItems.clear());
-  }
-
-  Widget _jobDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textMuted,
-              ),
-            ),
-          ),
-          Expanded(child: Text(value)),
-        ],
-      ),
-    );
-  }
-
-  Widget _jobDetailBlock(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(value),
-        ],
-      ),
-    );
-  }
-}
-
 class InvoicesPage extends StatefulWidget {
   const InvoicesPage({super.key});
 
@@ -1888,24 +1879,29 @@ class InvoicesPage extends StatefulWidget {
 }
 
 class _InvoicesPageState extends State<InvoicesPage> {
-  String? selectedJobCardId;
-  final labourDesc = TextEditingController();
-  final labourAmount = TextEditingController();
-  String? partStockItemId;
-  final partQty = TextEditingController(text: '1');
-
-  final labourLines = <InvoiceLineDraft>[];
-  final partLines = <PartLineDraft>[];
-  String paymentStatus = PaymentStatus.unpaid.name;
-  final amountPaidController = TextEditingController(text: '0');
+  final search = TextEditingController();
 
   @override
   void dispose() {
-    labourDesc.dispose();
-    labourAmount.dispose();
-    partQty.dispose();
-    amountPaidController.dispose();
+    search.dispose();
     super.dispose();
+  }
+
+  List<Invoice> _filteredInvoices(GarageStore store) {
+    final query = search.text.trim().toLowerCase();
+    final invoices = List<Invoice>.from(store.invoices)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (query.isEmpty) {
+      return invoices;
+    }
+
+    return invoices.where((invoice) {
+      return invoice.vehicleNumber.toLowerCase().contains(query) ||
+          invoice.invoiceNumber.toString().contains(query) ||
+          store.customerName(invoice.customerId).toLowerCase().contains(query) ||
+          invoice.paymentStatus.label.toLowerCase().contains(query);
+    }).toList();
   }
 
   Future<void> _recordPayment(GarageStore store, Invoice invoice) async {
@@ -2047,31 +2043,10 @@ class _InvoicesPageState extends State<InvoicesPage> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
-    final completedJobCards = store.jobCards
-        .where((jobCard) => jobCard.status == JobStatus.completed)
-        .toList();
-    if (completedJobCards.isEmpty) {
-      selectedJobCardId = null;
-    } else if (selectedJobCardId == null ||
-        !completedJobCards.any((jobCard) => jobCard.id == selectedJobCardId)) {
-      selectedJobCardId = completedJobCards.first.id;
-    }
-    if (store.stockItems.isEmpty) {
-      partStockItemId = null;
-    } else if (partStockItemId == null ||
-        !store.stockItems.any((item) => item.id == partStockItemId)) {
-      partStockItemId = store.stockItems.first.id;
-    }
-
-    final labourTotal = labourLines.fold<double>(
-      0,
-      (sum, item) => sum + item.amount,
-    );
-    final partsTotal = partLines.fold<double>(
-      0,
-      (sum, line) => sum + line.amountFor(store.stockItems),
-    );
-    final stockWarning = store.validatePartsStock(partLines);
+    final invoices = _filteredInvoices(store);
+    final unpaidCount = invoices
+        .where((invoice) => invoice.paymentStatus != PaymentStatus.paid)
+        .length;
 
     return SingleChildScrollView(
       child: Column(
@@ -2079,282 +2054,138 @@ class _InvoicesPageState extends State<InvoicesPage> {
         children: [
           const PageHeader(
             title: 'Invoices',
-            subtitle: 'Split labour and parts, then generate bill',
+            subtitle: 'Bills created from estimates — record payment here',
             icon: Icons.receipt_long_rounded,
           ),
           SectionCard(
-            title: 'Create Invoice',
-            icon: Icons.post_add_rounded,
+            title: 'All Invoices',
+            icon: Icons.history_rounded,
+            subtitle: unpaidCount > 0
+                ? '$unpaidCount awaiting payment'
+                : '${invoices.length} total',
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    DropdownButton<String>(
-                      value: selectedJobCardId,
-                      hint: const Text('Completed Job Card'),
-                      items: completedJobCards
-                          .map(
-                            (jobCard) => DropdownMenuItem(
-                              value: jobCard.id,
-                              child: Text(
-                                '#${jobCard.jobCardNumber} · ${store.vehicleNumber(jobCard.vehicleId)}',
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setState(() => selectedJobCardId = value),
+                AppSearchField(
+                  controller: search,
+                  hint: 'Search vehicle, invoice #, customer, status…',
+                  expand: true,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 12),
+                if (invoices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No invoices yet. Convert an estimate to create one.',
+                      style: TextStyle(color: AppColors.textMuted),
                     ),
-                    FilledButton.icon(
-                      onPressed: selectedJobCardId == null
-                          ? null
-                          : () async {
-                              final error = await store.convertJobCardToInvoice(
-                                jobCardId: selectedJobCardId!,
-                                labourItems: labourLines,
-                                partsItems: partLines,
-                                paymentStatus: PaymentStatus.values.firstWhere(
-                                  (status) => status.name == paymentStatus,
+                  )
+                else
+                  ...invoices.map((invoice) {
+                    final isPaid = invoice.paymentStatus == PaymentStatus.paid;
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      clipBehavior: Clip.antiAlias,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '#${invoice.invoiceNumber} · ${invoice.vehicleNumber}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${store.customerName(invoice.customerId)} · '
+                                        '${DateFormat('dd MMM yyyy').format(invoice.createdAt)}',
+                                        style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${invoice.paymentStatus.label} · '
+                                        'Balance ${formatAmount(invoice.balanceAmount)}',
+                                        style: TextStyle(
+                                          color: isPaid
+                                              ? AppColors.success
+                                              : AppColors.warning,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                amountPaid: double.tryParse(
-                                        amountPaidController.text.trim()) ??
-                                    0,
-                              );
-                              if (error != null) {
-                                showAppSnackBar(context, error);
-                                return;
-                              }
-                              setState(() {
-                                labourLines.clear();
-                                partLines.clear();
-                              });
-                            },
-                      icon: const Icon(Icons.receipt_rounded, size: 20),
-                      label: const Text('Create Invoice'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Labour',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.end,
-            children: [
-              AppTextField(controller: labourDesc, label: 'Description', width: 260),
-              AppTextField(controller: labourAmount, label: 'Amount'),
-              OutlinedButton.icon(
-                onPressed: () {
-                  final parsed = double.tryParse(labourAmount.text.trim()) ?? 0;
-                  if (labourDesc.text.trim().isEmpty || parsed <= 0) {
-                    return;
-                  }
-                  setState(() {
-                    labourLines.add(
-                      InvoiceLineDraft(
-                        description: labourDesc.text.trim(),
-                        amount: parsed,
+                                Text(
+                                  formatAmount(invoice.grandTotal),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 18,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    await Printing.layoutPdf(
+                                      onLayout: (format) => buildInvoicePdf(
+                                        invoice: invoice,
+                                        store: store,
+                                        format: format,
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.picture_as_pdf_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Print'),
+                                ),
+                                if (!isPaid) ...[
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _recordPayment(store, invoice),
+                                    icon: const Icon(
+                                      Icons.account_balance_wallet_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Record Payment'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: () =>
+                                        _markInvoiceFullyPaid(store, invoice),
+                                    icon: const Icon(Icons.payments_rounded, size: 18),
+                                    label: const Text('Mark Paid'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
-                  });
-                  labourDesc.clear();
-                  labourAmount.clear();
-                },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Labour'),
-              ),
-            ],
-          ),
-          ...labourLines.map(
-            (line) => DataListTile(
-              title: line.description,
-              trailing: Text(
-                formatAmount(line.amount),
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Parts',
-            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.end,
-            children: [
-              DropdownButton<String>(
-                value: partStockItemId,
-                items: store.stockItems
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item.id,
-                        child: Text('${item.name} (${item.currentStock})'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => partStockItemId = value),
-              ),
-              AppTextField(controller: partQty, label: 'Qty', width: 100),
-              OutlinedButton.icon(
-                onPressed: partStockItemId == null
-                    ? null
-                    : () {
-                        final qty = int.tryParse(partQty.text.trim()) ?? 0;
-                        if (qty <= 0) {
-                          return;
-                        }
-                        setState(() {
-                          final existingIndex = partLines.indexWhere(
-                            (line) => line.stockItemId == partStockItemId,
-                          );
-                          if (existingIndex >= 0) {
-                            final existing = partLines[existingIndex];
-                            partLines[existingIndex] = PartLineDraft(
-                              stockItemId: existing.stockItemId,
-                              qty: existing.qty + qty,
-                            );
-                          } else {
-                            partLines.add(
-                              PartLineDraft(
-                                stockItemId: partStockItemId!,
-                                qty: qty,
-                              ),
-                            );
-                          }
-                        });
-                        partQty.text = '1';
-                      },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Part'),
-              ),
-            ],
-          ),
-          if (stockWarning != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              stockWarning,
-              style: const TextStyle(color: AppColors.warning, fontSize: 13),
-            ),
-          ],
-          ...partLines.map(
-            (line) => DataListTile(
-              title: store.stockItemName(line.stockItemId),
-              subtitle: 'Qty ${line.qty}',
-              trailing: Text(
-                formatAmount(line.amountFor(store.stockItems)),
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          ResponsiveTotalsBar(
-            items: [
-              ('Labour', formatAmount(labourTotal)),
-              ('Parts', formatAmount(partsTotal)),
-            ],
-            grandTotalLabel:
-                'Grand Total: ${formatAmount(labourTotal + partsTotal)}',
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              DropdownMenu<String>(
-                initialSelection: paymentStatus,
-                label: const Text('Payment Status'),
-                dropdownMenuEntries: PaymentStatus.values
-                    .map(
-                      (status) => DropdownMenuEntry(
-                        value: status.name,
-                        label: status.label,
-                      ),
-                    )
-                    .toList(),
-                onSelected: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  setState(() {
-                    paymentStatus = value;
-                  });
-                },
-              ),
-              AppTextField(
-                controller: amountPaidController,
-                label: 'Amount Paid',
-                width: 180,
-              ),
-            ],
-          ),
+                  }),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          SectionCard(
-            title: 'Recent Invoices',
-            icon: Icons.history_rounded,
-            child: Column(
-              children: store.invoices.map(
-                (invoice) => DataListTile(
-                  title: '#${invoice.invoiceNumber} · ${store.vehicleNumber(invoice.vehicleId)}',
-                  subtitle:
-                      '${invoice.paymentStatus.label} · Balance ${formatAmount(invoice.balanceAmount)}',
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        formatAmount(invoice.grandTotal),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                      if (invoice.paymentStatus != PaymentStatus.paid) ...[
-                        IconButton(
-                          tooltip: 'Mark fully paid',
-                          onPressed: () => _markInvoiceFullyPaid(store, invoice),
-                          icon: const Icon(
-                            Icons.payments_rounded,
-                            color: AppColors.success,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Record payment',
-                          onPressed: () => _recordPayment(store, invoice),
-                          icon: const Icon(
-                            Icons.account_balance_wallet_outlined,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                      IconButton(
-                        tooltip: 'Print PDF',
-                        onPressed: () async {
-                          await Printing.layoutPdf(
-                            onLayout: (format) => buildInvoicePdf(
-                              invoice: invoice,
-                              store: store,
-                              format: format,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
-                      ),
-                    ],
-                  ),
-                ),
-              ).toList(),
             ),
           ),
         ],
@@ -2371,57 +2202,112 @@ class EstimatesPage extends StatefulWidget {
 }
 
 class _EstimatesPageState extends State<EstimatesPage> {
-  String? selectedJobCardId;
-  String? directCustomerId;
-  String? directVehicleId;
-  bool useDirectVehicle = false;
-  final kmController = TextEditingController();
-  final notesController = TextEditingController();
-  final labourDesc = TextEditingController();
-  final labourAmount = TextEditingController();
-  String? partStockItemId;
-  final partQty = TextEditingController(text: '1');
-  final labourLines = <InvoiceLineDraft>[];
-  final partLines = <PartLineDraft>[];
+  final search = TextEditingController();
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  List<Estimate> _openEstimates(GarageStore store) {
+    final query = search.text.trim().toLowerCase();
+    final estimates = store.estimates
+        .where(
+          (estimate) =>
+              estimate.status != EstimateStatus.converted &&
+              estimate.status != EstimateStatus.rejected,
+        )
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (query.isEmpty) {
+      return estimates;
+    }
+
+    return estimates.where((estimate) {
+      return estimate.vehicleNumber.toLowerCase().contains(query) ||
+          estimate.estimateNumber.toString().contains(query) ||
+          store.customerName(estimate.customerId).toLowerCase().contains(query);
+    }).toList();
+  }
+
+  Future<void> _editEstimate(
+    BuildContext context,
+    GarageStore store,
+    Estimate estimate,
+  ) async {
+    final jobCardId = estimate.jobCardId;
+    if (jobCardId == null) {
+      showAppSnackBar(context, 'This estimate is not linked to a job card');
+      return;
+    }
+    final jobCard =
+        store.jobCards.where((item) => item.id == jobCardId).firstOrNull;
+    if (jobCard == null) {
+      showAppSnackBar(context, 'Job card not found');
+      return;
+    }
+    final saved = await EstimateEditorDialog.show(
+      context,
+      jobCard: jobCard,
+      existingEstimate: estimate,
+    );
+    if (saved == true && context.mounted) {
+      showAppSnackBar(
+        context,
+        'Estimate updated',
+        backgroundColor: AppColors.success,
+      );
+    }
+  }
+
+  Future<void> _markJobDone(GarageStore store, Estimate estimate) async {
+    final jobCardId = estimate.jobCardId;
+    if (jobCardId == null) {
+      return;
+    }
+    await store.updateJobCardStatus(jobCardId, JobStatus.completed);
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Job marked as work done',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _convertToInvoice(
+    BuildContext context,
+    GarageStore store,
+    Estimate estimate,
+  ) async {
+    final error = await store.convertEstimateToInvoice(estimate.id);
+    if (!context.mounted) {
+      return;
+    }
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    if (estimate.jobCardId != null) {
+      await store.updateJobCardStatus(estimate.jobCardId!, JobStatus.delivered);
+    }
+    if (!context.mounted) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Invoice created — check Invoices tab',
+      backgroundColor: AppColors.success,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
-    final openJobCards = store.jobCards
-        .where((jobCard) => jobCard.status != JobStatus.delivered)
-        .toList();
-
-    if (openJobCards.isEmpty) {
-      selectedJobCardId = null;
-    } else if (!useDirectVehicle &&
-        (selectedJobCardId == null ||
-            !openJobCards.any((jobCard) => jobCard.id == selectedJobCardId))) {
-      selectedJobCardId = openJobCards.first.id;
-    }
-
-    directCustomerId ??=
-        store.customers.isNotEmpty ? store.customers.first.id : null;
-    final directVehicles = store.vehicles
-        .where((vehicle) => vehicle.customerId == directCustomerId)
-        .toList();
-    if (directVehicles.isEmpty) {
-      directVehicleId = null;
-    } else if (directVehicleId == null ||
-        !directVehicles.any((vehicle) => vehicle.id == directVehicleId)) {
-      directVehicleId = directVehicles.first.id;
-    }
-
-    if (store.stockItems.isEmpty) {
-      partStockItemId = null;
-    } else if (partStockItemId == null ||
-        !store.stockItems.any((item) => item.id == partStockItemId)) {
-      partStockItemId = store.stockItems.first.id;
-    }
-
-    final labourTotal =
-        labourLines.fold<double>(0, (sum, item) => sum + item.amount);
-    final partsTotal =
-        partLines.fold<double>(0, (sum, line) => sum + line.amountFor(store.stockItems));
+    final openEstimates = _openEstimates(store);
 
     return SingleChildScrollView(
       child: Column(
@@ -2429,441 +2315,157 @@ class _EstimatesPageState extends State<EstimatesPage> {
         children: [
           const PageHeader(
             title: 'Estimates',
-            subtitle: 'Quote labour and parts before billing the customer',
+            subtitle: 'Print, edit, or convert to invoice when customer agrees',
             icon: Icons.request_quote_rounded,
           ),
           SectionCard(
-            title: 'Create Estimate',
-            icon: Icons.calculate_rounded,
+            title: 'Open Estimates',
+            icon: Icons.list_alt_rounded,
+            subtitle: '${openEstimates.length} waiting',
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    FilterChip(
-                      label: const Text('From Job Card'),
-                      selected: !useDirectVehicle,
-                      onSelected: (_) => setState(() => useDirectVehicle = false),
-                    ),
-                    FilterChip(
-                      label: const Text('Direct Vehicle'),
-                      selected: useDirectVehicle,
-                      onSelected: (_) => setState(() => useDirectVehicle = true),
-                    ),
-                  ],
+                AppSearchField(
+                  controller: search,
+                  hint: 'Search vehicle, estimate #, or customer…',
+                  expand: true,
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 12),
-                if (!useDirectVehicle)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.end,
-                    children: [
-                      DropdownButton<String>(
-                        value: selectedJobCardId,
-                        hint: const Text('Open Job Card'),
-                        items: openJobCards
-                            .map(
-                              (jobCard) => DropdownMenuItem(
-                                value: jobCard.id,
-                                child: Text(
-                                  '#${jobCard.jobCardNumber} · ${store.vehicleNumber(jobCard.vehicleId)}',
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) =>
-                            setState(() => selectedJobCardId = value),
-                      ),
-                    ],
-                  )
-                else
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.end,
-                    children: [
-                      DropdownButton<String>(
-                        value: directCustomerId,
-                        hint: const Text('Party'),
-                        items: store.customers
-                            .map(
-                              (customer) => DropdownMenuItem(
-                                value: customer.id,
-                                child: Text(customer.name),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) => setState(() {
-                          directCustomerId = value;
-                          directVehicleId = null;
-                        }),
-                      ),
-                      DropdownButton<String>(
-                        value: directVehicleId,
-                        hint: const Text('Vehicle'),
-                        items: directVehicles
-                            .map(
-                              (vehicle) => DropdownMenuItem(
-                                value: vehicle.id,
-                                child: Text(vehicle.regNumber),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) =>
-                            setState(() => directVehicleId = value),
-                      ),
-                      AppTextField(
-                        controller: kmController,
-                        label: 'KM Reading',
-                        width: 140,
-                      ),
-                    ],
-                  ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Labour',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    AppTextField(
-                      controller: labourDesc,
-                      label: 'Description',
-                      width: 260,
-                    ),
-                    AppTextField(controller: labourAmount, label: 'Amount'),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        final parsed =
-                            double.tryParse(labourAmount.text.trim()) ?? 0;
-                        if (labourDesc.text.trim().isEmpty || parsed <= 0) {
-                          return;
-                        }
-                        setState(() {
-                          labourLines.add(
-                            InvoiceLineDraft(
-                              description: labourDesc.text.trim(),
-                              amount: parsed,
-                            ),
-                          );
-                          labourDesc.clear();
-                          labourAmount.clear();
-                        });
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Labour'),
-                    ),
-                  ],
-                ),
-                ...labourLines.map(
-                  (line) => DataListTile(
-                    title: line.description,
-                    trailing: Text(
-                      formatAmount(line.amount),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Parts',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    DropdownButton<String>(
-                      value: partStockItemId,
-                      items: store.stockItems
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item.id,
-                              child: Text('${item.name} (${item.currentStock})'),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) =>
-                          setState(() => partStockItemId = value),
-                    ),
-                    AppTextField(
-                      controller: partQty,
-                      label: 'Qty',
-                      width: 100,
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: partStockItemId == null
-                          ? null
-                          : () {
-                              final qty = int.tryParse(partQty.text.trim()) ?? 0;
-                              if (qty <= 0) return;
-                              setState(() {
-                                partLines.add(
-                                  PartLineDraft(
-                                    stockItemId: partStockItemId!,
-                                    qty: qty,
-                                  ),
-                                );
-                                partQty.text = '1';
-                              });
-                            },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Part'),
-                    ),
-                  ],
-                ),
-                ...partLines.map(
-                  (line) => DataListTile(
-                    title: store.stockItemName(line.stockItemId),
-                    subtitle: 'Qty ${line.qty}',
-                    trailing: Text(
-                      formatAmount(line.amountFor(store.stockItems)),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                AppTextField(
-                  controller: notesController,
-                  label: 'Notes / Validity',
-                  width: 360,
-                ),
-                const SizedBox(height: 16),
-                ResponsiveTotalsBar(
-                  items: [
-                    ('Labour', formatAmount(labourTotal)),
-                    ('Parts', formatAmount(partsTotal)),
-                  ],
-                  grandTotalLabel:
-                      'Estimate Total: ${formatAmount(labourTotal + partsTotal)}',
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: _canSaveEstimate(store)
-                      ? () async {
-                          final saved = await store.createEstimate(
-                            jobCardId:
-                                useDirectVehicle ? null : selectedJobCardId,
-                            customerId: useDirectVehicle ? directCustomerId : null,
-                            vehicleId: useDirectVehicle ? directVehicleId : null,
-                            kmReading: useDirectVehicle
-                                ? int.tryParse(kmController.text.trim())
-                                : null,
-                            labourItems: labourLines,
-                            partsItems: partLines,
-                            notes: notesController.text.trim(),
-                          );
-                          if (!saved) return;
-                          setState(() {
-                            labourLines.clear();
-                            partLines.clear();
-                            notesController.clear();
-                            kmController.clear();
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text('Estimate saved'),
-                              backgroundColor: AppColors.success,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
-                          );
-                        }
-                      : null,
-                  icon: const Icon(Icons.save_rounded, size: 20),
-                  label: const Text('Save Estimate'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          SectionCard(
-            title: 'Saved Estimates',
-            icon: Icons.list_alt_rounded,
-            subtitle:
-                'Use Convert to Invoice to bill the customer. Status becomes Converted automatically.',
-            child: store.estimates.isEmpty
-                ? const Padding(
+                if (openEstimates.isEmpty)
+                  const Padding(
                     padding: EdgeInsets.symmetric(vertical: 8),
                     child: Text(
-                      'No estimates yet. Create one above.',
+                      'No open estimates. Create one from Job Cards.',
                       style: TextStyle(color: AppColors.textMuted),
                     ),
                   )
-                : Column(
-              children: store.estimates.map((estimate) {
-                final isConverted = estimate.status == EstimateStatus.converted;
-                final isRejected = estimate.status == EstimateStatus.rejected;
-                final canConvert = !isConverted && !isRejected;
-                return DataListTile(
-                  title:
-                      '#${estimate.estimateNumber} · ${estimate.vehicleNumber}',
-                  subtitle:
-                      '${estimate.status.label} · ${DateFormat('dd-MM-yyyy').format(estimate.createdAt)}',
-                  trailing: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 520;
-                      final statusControl = isConverted
-                          ? Wrap(
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              spacing: 8,
-                              children: [
-                                Chip(
-                                  label: Text(estimate.status.label),
-                                  backgroundColor:
-                                      AppColors.success.withValues(alpha: 0.12),
-                                ),
-                                TextButton(
-                                  onPressed: () async {
-                                    await store.reopenEstimate(estimate.id);
-                                    if (context.mounted) {
-                                      showAppSnackBar(
-                                        context,
-                                        'Estimate reopened — use Convert to Invoice to bill',
-                                        backgroundColor: AppColors.success,
-                                      );
-                                    }
-                                  },
-                                  child: const Text('Reopen'),
-                                ),
-                              ],
-                            )
-                          : DropdownButton<EstimateStatus>(
-                              value: estimate.status,
-                              items: EstimateStatus.values
-                                  .where(
-                                    (status) =>
-                                        status != EstimateStatus.converted,
-                                  )
-                                  .map(
-                                    (status) => DropdownMenuItem(
-                                      value: status,
-                                      child: Text(status.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (value) {
-                                if (value == null) return;
-                                store.updateEstimateStatus(estimate.id, value);
-                              },
-                            );
-                      final amount = Text(
-                        formatAmount(estimate.grandTotal),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
-                      );
-                      final pdfButton = IconButton(
-                        tooltip: 'Print Estimate',
-                        onPressed: () async {
-                          await Printing.layoutPdf(
-                            onLayout: (format) => buildEstimatePdf(
-                              estimate: estimate,
-                              store: store,
-                              format: format,
-                            ),
-                          );
-                        },
-                        icon: const Icon(
-                          Icons.picture_as_pdf_rounded,
-                          color: AppColors.primary,
-                        ),
-                      );
-                      final convertButton = canConvert
-                          ? FilledButton.tonalIcon(
-                              onPressed: () async {
-                                final error = await store.convertEstimateToInvoice(
-                                  estimate.id,
-                                );
-                                if (!context.mounted) return;
-                                if (error != null) {
-                                  showAppSnackBar(context, error);
-                                  return;
-                                }
-                                showAppSnackBar(
-                                  context,
-                                  'Invoice created — check Invoices tab',
-                                  backgroundColor: AppColors.success,
-                                );
-                              },
-                              icon: const Icon(Icons.receipt_long_rounded, size: 18),
-                              label: Text(compact ? 'Bill' : 'Convert to Invoice'),
-                            )
-                          : null;
-
-                      if (compact) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                else
+                  ...openEstimates.map((estimate) {
+                    final jobCard = estimate.jobCardId == null
+                        ? null
+                        : store.jobCards
+                            .where((item) => item.id == estimate.jobCardId)
+                            .firstOrNull;
+                    final jobDone =
+                        jobCard?.status == JobStatus.completed ||
+                            jobCard?.status == JobStatus.delivered;
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      clipBehavior: Clip.antiAlias,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
-                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                statusControl,
-                                const SizedBox(width: 8),
-                                amount,
-                                pdfButton,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '#${estimate.estimateNumber} · ${estimate.vehicleNumber}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${store.customerName(estimate.customerId)} · '
+                                        '${DateFormat('dd MMM yyyy').format(estimate.createdAt)}',
+                                        style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      if (jobCard != null) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Job #${jobCard.jobCardNumber} · ${jobCard.status.label}',
+                                          style: const TextStyle(
+                                            color: AppColors.textMuted,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  formatAmount(estimate.grandTotal),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 18,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
                               ],
                             ),
-                            if (convertButton != null) ...[
-                              const SizedBox(height: 8),
-                              convertButton,
-                            ],
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (estimate.jobCardId != null)
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _editEstimate(context, store, estimate),
+                                    icon: const Icon(Icons.edit_outlined, size: 18),
+                                    label: const Text('Edit'),
+                                  ),
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    await Printing.layoutPdf(
+                                      onLayout: (format) => buildEstimatePdf(
+                                        estimate: estimate,
+                                        store: store,
+                                        format: format,
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.picture_as_pdf_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Print'),
+                                ),
+                                if (estimate.jobCardId != null && !jobDone)
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _markJobDone(store, estimate),
+                                    icon: const Icon(
+                                      Icons.check_circle_outline_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Mark Job Done'),
+                                  ),
+                                FilledButton.icon(
+                                  onPressed: () =>
+                                      _convertToInvoice(context, store, estimate),
+                                  icon: const Icon(
+                                    Icons.receipt_long_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Convert to Invoice'),
+                                ),
+                              ],
+                            ),
                           ],
-                        );
-                      }
-
-                      return Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          statusControl,
-                          const SizedBox(width: 8),
-                          amount,
-                          pdfButton,
-                          if (convertButton != null) ...[
-                            const SizedBox(width: 8),
-                            convertButton,
-                          ],
-                        ],
-                      );
-                    },
-                  ),
-                );
-              }).toList(),
+                        ),
+                      ),
+                    );
+                  }),
+              ],
             ),
           ),
         ],
       ),
     );
   }
-
-  bool _canSaveEstimate(GarageStore store) {
-    if (labourLines.isEmpty && partLines.isEmpty) return false;
-    if (useDirectVehicle) {
-      return directCustomerId != null && directVehicleId != null;
-    }
-    return selectedJobCardId != null;
-  }
 }
-
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -2898,6 +2500,55 @@ class _SettingsPageState extends State<SettingsPage> {
     startEstimateNumber =
         TextEditingController(text: settings.nextEstimateNumber.toString());
     selectedRole = context.read<GarageStore>().activeRole.name;
+  }
+
+  Future<void> _confirmAndClearBrowserCache() async {
+    if (!isBrowserCacheClearSupported) {
+      showAppSnackBar(
+        context,
+        'Cache clear is available on the web app in Chrome/browser only.',
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear browser cache?'),
+        content: const Text(
+          'This clears saved app data in this browser (temporary files, '
+          'offline copies) and reloads the page.\n\n'
+          'Your garage records in Firebase are safe — only this browser\'s '
+          'cached copy is removed.\n\n'
+          'Use this if the screen looks stuck or shows old data.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear & Reload'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      await clearBrowserCache();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showAppSnackBar(context, 'Could not clear cache: $error');
+    }
   }
 
   @override
@@ -2983,6 +2634,28 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
               ),
+          ),
+          const SizedBox(height: 16),
+          SectionCard(
+            title: 'Browser Cache',
+            icon: Icons.cleaning_services_rounded,
+            subtitle: 'If the app looks stuck or shows old data',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'No need to open browser settings. Tap below to clear this '
+                  'browser\'s saved app cache and reload fresh.',
+                  style: TextStyle(color: AppColors.textMuted, height: 1.45),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _confirmAndClearBrowserCache,
+                  icon: const Icon(Icons.cached_rounded, size: 20),
+                  label: const Text('Clear Browser Cache & Reload'),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           SectionCard(
