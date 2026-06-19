@@ -27,6 +27,7 @@ class GarageStore extends ChangeNotifier {
   final estimates = <Estimate>[];
   final invoices = <Invoice>[];
   final stockTransactions = <StockTransaction>[];
+  final payments = <PaymentRecord>[];
 
   GarageSettings settings;
   UserRole activeRole = UserRole.admin;
@@ -53,6 +54,7 @@ class GarageStore extends ChangeNotifier {
   int _vehicleCounter = 1;
   int _stockCounter = 1;
   int _labourCounter = 1;
+  int _paymentCounter = 1;
 
   Future<void> initialize() async {
     final repo = _repo;
@@ -149,6 +151,15 @@ class GarageStore extends ChangeNotifier {
             return;
           }
           stockTransactions
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchPayments().listen((value) {
+          if (_disposed) {
+            return;
+          }
+          payments
             ..clear()
             ..addAll(value);
           notifyListeners();
@@ -261,17 +272,26 @@ class GarageStore extends ChangeNotifier {
     required String mobile,
     required String address,
   }) async {
+    final normalizedMobile = normalizeMobile(mobile);
+    final existing = customerByMobile(normalizedMobile);
+    if (existing != null) {
+      lastError =
+          'Party already exists: ${existing.name} (${existing.mobile})';
+      notifyListeners();
+      return null;
+    }
+
     if (_repo == null) {
       return _addCustomerMemory(
         name: name,
-        mobile: mobile,
+        mobile: normalizedMobile,
         address: address,
       );
     }
     try {
       return await _repo.addCustomer(
         name: name,
-        mobile: mobile,
+        mobile: normalizedMobile,
         address: address,
       );
     } catch (error) {
@@ -279,6 +299,16 @@ class GarageStore extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+  }
+
+  Customer? customerByMobile(String mobile) {
+    final normalized = normalizeMobile(mobile);
+    if (normalized.isEmpty) {
+      return null;
+    }
+    return customers
+        .where((customer) => normalizeMobile(customer.mobile) == normalized)
+        .firstOrNull;
   }
 
   Customer _addCustomerMemory({
@@ -1083,6 +1113,275 @@ class GarageStore extends ChangeNotifier {
     );
     notifyListeners();
     return null;
+  }
+
+  List<PaymentRecord> paymentsForInvoice(String invoiceId) {
+    return payments
+        .where((payment) => payment.invoiceId == invoiceId)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  List<PaymentRecord> advancesForCustomer(String customerId) {
+    return payments
+        .where((payment) => payment.customerId == customerId && payment.isAdvance)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  double customerAdvanceBalance(String customerId) {
+    return advancesForCustomer(customerId)
+        .fold<double>(0, (sum, payment) => sum + payment.amount);
+  }
+
+  double _invoicePaidFromRecords(String invoiceId) {
+    return paymentsForInvoice(invoiceId)
+        .fold<double>(0, (sum, payment) => sum + payment.amount);
+  }
+
+  void _syncInvoicePaymentMemory(String invoiceId) {
+    final index = invoices.indexWhere((invoice) => invoice.id == invoiceId);
+    if (index == -1) {
+      return;
+    }
+    final invoice = invoices[index];
+    final totalPaid = _invoicePaidFromRecords(invoiceId);
+    final clampedPaid = totalPaid.clamp(0, invoice.grandTotal).toDouble();
+    invoices[index] = invoice.copyWith(
+      amountPaid: clampedPaid,
+      paymentStatus: paymentStatusForAmount(clampedPaid, invoice.grandTotal),
+    );
+  }
+
+  Future<String?> recordPaymentReceipt({
+    required String customerId,
+    String? invoiceId,
+    required double amount,
+    String note = '',
+  }) async {
+    if (amount <= 0) {
+      lastError = 'Enter a valid amount';
+      return lastError;
+    }
+
+    if (_repo != null) {
+      final error = await _repo.addPaymentReceipt(
+        customerId: customerId,
+        invoiceId: invoiceId,
+        amount: amount,
+        note: note,
+      );
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
+    }
+
+    payments.insert(
+      0,
+      PaymentRecord(
+        id: 'P${_paymentCounter++}',
+        customerId: customerId,
+        invoiceId: invoiceId,
+        amount: amount,
+        note: note,
+        createdAt: DateTime.now(),
+      ),
+    );
+    if (invoiceId != null) {
+      _syncInvoicePaymentMemory(invoiceId);
+    }
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> applyAdvanceToInvoice({
+    required String paymentId,
+    required String invoiceId,
+  }) async {
+    if (_repo != null) {
+      final error = await _repo.applyAdvanceToInvoice(
+        paymentId: paymentId,
+        invoiceId: invoiceId,
+      );
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
+    }
+
+    final paymentIndex = payments.indexWhere((payment) => payment.id == paymentId);
+    if (paymentIndex == -1) {
+      lastError = 'Advance payment not found';
+      return lastError;
+    }
+    final payment = payments[paymentIndex];
+    if (!payment.isAdvance) {
+      lastError = 'Payment is already linked to a bill';
+      return lastError;
+    }
+
+    final invoiceIndex = invoices.indexWhere((invoice) => invoice.id == invoiceId);
+    if (invoiceIndex == -1) {
+      lastError = 'Invoice not found';
+      return lastError;
+    }
+    final invoice = invoices[invoiceIndex];
+    if (invoice.customerId != payment.customerId) {
+      lastError = 'Advance belongs to a different customer';
+      return lastError;
+    }
+    if (invoice.balanceAmount <= 0) {
+      lastError = 'Invoice is already fully paid';
+      return lastError;
+    }
+
+    payments[paymentIndex] = payment.copyWith(invoiceId: invoiceId);
+    _syncInvoicePaymentMemory(invoiceId);
+    notifyListeners();
+    return null;
+  }
+
+  String? _applyInvoicePartStockChangeMemory({
+    required List<InvoicePartLine> oldParts,
+    required List<PartLineDraft> newPartDrafts,
+    required String invoiceId,
+  }) {
+    final oldTotals = <String, int>{};
+    for (final part in oldParts) {
+      oldTotals[part.stockItemId] =
+          (oldTotals[part.stockItemId] ?? 0) + part.qty;
+    }
+    final newTotals = <String, int>{};
+    for (final draft in newPartDrafts) {
+      newTotals[draft.stockItemId] =
+          (newTotals[draft.stockItemId] ?? 0) + draft.qty;
+    }
+
+    final stockIds = {...oldTotals.keys, ...newTotals.keys};
+    for (final stockId in stockIds) {
+      final oldQty = oldTotals[stockId] ?? 0;
+      final newQty = newTotals[stockId] ?? 0;
+      final netChange = newQty - oldQty;
+      if (netChange == 0) {
+        continue;
+      }
+
+      final stockIndex = stockItems.indexWhere((item) => item.id == stockId);
+      if (stockIndex == -1) {
+        if (netChange > 0) {
+          return 'Stock item not found';
+        }
+        continue;
+      }
+
+      final item = stockItems[stockIndex];
+      if (netChange > 0) {
+        if (item.currentStock < netChange) {
+          return 'Insufficient stock for ${item.name}';
+        }
+        stockItems[stockIndex] =
+            item.copyWith(currentStock: item.currentStock - netChange);
+        stockTransactions.insert(
+          0,
+          StockTransaction(
+            id: 'ST${stockTransactions.length + 1}',
+            stockItemId: stockId,
+            type: StockTransactionType.out,
+            qty: netChange,
+            referenceType: 'invoice_edit',
+            referenceId: invoiceId,
+            createdAt: DateTime.now(),
+          ),
+        );
+      } else {
+        final returnQty = -netChange;
+        stockItems[stockIndex] =
+            item.copyWith(currentStock: item.currentStock + returnQty);
+        stockTransactions.insert(
+          0,
+          StockTransaction(
+            id: 'ST${stockTransactions.length + 1}',
+            stockItemId: stockId,
+            type: StockTransactionType.inType,
+            qty: returnQty,
+            referenceType: 'invoice_edit',
+            referenceId: invoiceId,
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    }
+    return null;
+  }
+
+  Future<bool> updateInvoice({
+    required String invoiceId,
+    required List<InvoiceLineDraft> labourLines,
+    required List<PartLineDraft> partsItems,
+    bool notify = true,
+  }) async {
+    if (labourLines.isEmpty && partsItems.isEmpty) {
+      lastError = 'Add at least one labour item or part';
+      return false;
+    }
+
+    if (_repo != null) {
+      final error = await _repo.updateInvoice(
+        invoiceId: invoiceId,
+        labourItems: labourLines,
+        partsItems: partsItems,
+        stockItems: stockItems,
+      );
+      if (error != null) {
+        lastError = error;
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+      return true;
+    }
+
+    final index = invoices.indexWhere((invoice) => invoice.id == invoiceId);
+    if (index == -1) {
+      lastError = 'Invoice not found';
+      return false;
+    }
+
+    final existing = invoices[index];
+    final stockError = _applyInvoicePartStockChangeMemory(
+      oldParts: existing.partsItems,
+      newPartDrafts: partsItems,
+      invoiceId: existing.id,
+    );
+    if (stockError != null) {
+      lastError = stockError;
+      return false;
+    }
+
+    final partRecords = _partRecordsFromDrafts(partsItems);
+    final labourTotal =
+        labourLines.fold<double>(0, (sum, item) => sum + item.amount);
+    final partsTotal =
+        partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+    final grandTotal = labourTotal + partsTotal;
+    final clampedPaid = existing.amountPaid.clamp(0, grandTotal).toDouble();
+    final resolvedStatus =
+        paymentStatusForAmount(clampedPaid, grandTotal);
+
+    invoices[index] = existing.copyWith(
+      labourItems: List.of(labourLines),
+      partsItems: partRecords,
+      labourTotal: labourTotal,
+      partsTotal: partsTotal,
+      amountPaid: clampedPaid,
+      paymentStatus: resolvedStatus,
+    );
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
   }
 
   Future<String?> convertEstimateToInvoice(String estimateId) async {

@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/pages/job_cards_page.dart';
+import 'package:garage_management_system/src/pages/parties_list_page.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
 import 'package:garage_management_system/src/utils/garage_utils.dart';
 import 'package:garage_management_system/src/utils/browser_cache_clearer.dart';
 import 'package:garage_management_system/src/widgets/estimate_editor_dialog.dart';
+import 'package:garage_management_system/src/widgets/invoice_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/ui_components.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
 import 'package:intl/intl.dart';
@@ -704,6 +706,8 @@ class _PartiesPageState extends State<PartiesPage> {
   final brand = TextEditingController();
   final model = TextEditingController();
   final year = TextEditingController();
+  final advanceAmount = TextEditingController();
+  final advanceNote = TextEditingController();
 
   @override
   void dispose() {
@@ -715,6 +719,8 @@ class _PartiesPageState extends State<PartiesPage> {
     brand.dispose();
     model.dispose();
     year.dispose();
+    advanceAmount.dispose();
+    advanceNote.dispose();
     super.dispose();
   }
 
@@ -727,21 +733,38 @@ class _PartiesPageState extends State<PartiesPage> {
       showAppSnackBar(context, error);
       return;
     }
-    await store.addCustomer(
+    final addedMobile = normalizeMobile(mobile.text);
+    final existing = store.customerByMobile(addedMobile);
+    if (existing != null) {
+      _selectParty(existing);
+      showAppSnackBar(
+        context,
+        'Party already exists — ${existing.name} selected for Add Vehicle',
+      );
+      return;
+    }
+
+    final added = await store.addCustomer(
       name: customerName.text.trim(),
-      mobile: normalizeMobile(mobile.text),
+      mobile: addedMobile,
       address: address.text.trim(),
     );
     customerName.clear();
     mobile.clear();
     address.clear();
-    if (context.mounted) {
-      showAppSnackBar(
+    if (!context.mounted) {
+      return;
+    }
+    if (added == null) {
+      showAppSnackBar(context, store.lastError ?? 'Could not add party');
+      return;
+    }
+    _selectParty(added);
+    showAppSnackBar(
         context,
         'Party added',
         backgroundColor: AppColors.success,
       );
-    }
   }
 
   void _selectParty(Customer customer) {
@@ -749,6 +772,57 @@ class _PartiesPageState extends State<PartiesPage> {
       selectedCustomerId = customer.id;
       partySearch.text = customer.name;
     });
+  }
+
+  void _onPartySearchChanged(GarageStore store, String value) {
+    final trimmed = value.trim();
+    final selected = selectedCustomerId == null
+        ? null
+        : store.customers
+            .where((customer) => customer.id == selectedCustomerId)
+            .firstOrNull;
+    if (selected != null && selected.name == trimmed) {
+      return;
+    }
+    final match = store.customers
+        .where(
+          (customer) =>
+              customer.name.toLowerCase() == trimmed.toLowerCase() ||
+              customer.mobile == trimmed,
+        )
+        .firstOrNull;
+    setState(() => selectedCustomerId = match?.id);
+  }
+
+  Future<void> _recordAdvance(GarageStore store) async {
+    if (selectedCustomerId == null) {
+      showAppSnackBar(context, 'Select a party first.');
+      return;
+    }
+    final amount = double.tryParse(advanceAmount.text.trim()) ?? 0;
+    if (amount <= 0) {
+      showAppSnackBar(context, 'Enter a valid advance amount');
+      return;
+    }
+    final error = await store.recordPaymentReceipt(
+      customerId: selectedCustomerId!,
+      amount: amount,
+      note: advanceNote.text.trim(),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    advanceAmount.clear();
+    advanceNote.clear();
+    showAppSnackBar(
+      context,
+      'Advance ${formatAmount(amount)} recorded',
+      backgroundColor: AppColors.success,
+    );
   }
 
   Future<void> _addVehicle(GarageStore store) async {
@@ -791,23 +865,33 @@ class _PartiesPageState extends State<PartiesPage> {
     final store = context.watch<GarageStore>();
     if (store.customers.isEmpty) {
       selectedCustomerId = null;
-      partySearch.clear();
-    } else if (selectedCustomerId == null ||
-        !store.customers.any((customer) => customer.id == selectedCustomerId)) {
-      final first = store.customers.first;
-      selectedCustomerId = first.id;
-      if (partySearch.text != first.name) {
-        partySearch.text = first.name;
+      if (partySearch.text.isNotEmpty) {
+        partySearch.clear();
       }
+    } else if (selectedCustomerId != null &&
+        !store.customers.any((customer) => customer.id == selectedCustomerId)) {
+      selectedCustomerId = null;
+      partySearch.clear();
     }
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const PageHeader(
+          PageHeader(
             title: 'Party',
             subtitle: 'New customer? Add name & mobile, then add their vehicle',
             icon: Icons.people_rounded,
+            trailing: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => const PartiesListPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.table_rows_rounded, size: 18),
+              label: const Text('View All Parties'),
+            ),
           ),
           SectionCard(
             title: 'Step 1 — Add Customer',
@@ -855,6 +939,67 @@ class _PartiesPageState extends State<PartiesPage> {
           ),
           const SizedBox(height: 16),
           SectionCard(
+            title: 'Record Advance',
+            icon: Icons.savings_outlined,
+            subtitle: 'Customer pays before final bill — e.g. ₹10,000 at a time',
+            child: store.customers.isEmpty
+                ? const Text(
+                    'Add a party first to record advances.',
+                    style: TextStyle(color: AppColors.textMuted),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      PartySearchField(
+                        controller: partySearch,
+                        expand: true,
+                        optionsBuilder: store.searchCustomers,
+                        onSelected: _selectParty,
+                        onChanged: (value) => _onPartySearchChanged(store, value),
+                      ),
+                      if (selectedCustomerId != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Advance on account: '
+                          '${formatAmount(store.customerAdvanceBalance(selectedCustomerId!))}',
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      AppFormRow(
+                        children: [
+                          AppTextField(
+                            controller: advanceAmount,
+                            label: 'Amount received now (₹) *',
+                            expand: true,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(decimal: true),
+                            hint: 'e.g. 10000',
+                          ),
+                          AppTextField(
+                            controller: advanceNote,
+                            label: 'Note (optional)',
+                            expand: true,
+                            hint: 'Cash / UPI / date',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: selectedCustomerId == null
+                            ? null
+                            : () => _recordAdvance(store),
+                        icon: const Icon(Icons.add_card_rounded, size: 20),
+                        label: const Text('Record Advance'),
+                      ),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 16),
+          SectionCard(
             title: 'Step 2 — Add Vehicle',
             icon: Icons.directions_car_rounded,
             subtitle: 'Select customer above, then enter vehicle details',
@@ -888,7 +1033,7 @@ class _PartiesPageState extends State<PartiesPage> {
                         expand: true,
                         optionsBuilder: store.searchCustomers,
                         onSelected: _selectParty,
-                        onChanged: (_) => setState(() => selectedCustomerId = null),
+                        onChanged: (value) => _onPartySearchChanged(store, value),
                       ),
                       const SizedBox(height: 12),
                       AppFormRow(
@@ -1149,18 +1294,41 @@ class _VehicleHistoryPageState extends State<VehicleHistoryPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        await Printing.layoutPdf(
-                          onLayout: (format) => buildInvoicePdf(
-                            invoice: invoice,
-                            store: store,
-                            format: format,
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
-                      label: const Text('Print'),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final saved = await InvoiceEditorDialog.show(
+                              context,
+                              invoice: invoice,
+                            );
+                            if (!context.mounted || saved != true) {
+                              return;
+                            }
+                            showAppSnackBar(
+                              context,
+                              'Invoice #${invoice.invoiceNumber} updated',
+                              backgroundColor: AppColors.success,
+                            );
+                          },
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          label: const Text('Edit'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await Printing.layoutPdf(
+                              onLayout: (format) => buildInvoicePdf(
+                                invoice: invoice,
+                                store: store,
+                                format: format,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                          label: const Text('Print'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1904,75 +2072,110 @@ class _InvoicesPageState extends State<InvoicesPage> {
     }).toList();
   }
 
+  Future<void> _editInvoice(
+    BuildContext context,
+    GarageStore store,
+    Invoice invoice,
+  ) async {
+    final saved = await InvoiceEditorDialog.show(context, invoice: invoice);
+    if (!context.mounted) {
+      return;
+    }
+    if (saved == true) {
+      showAppSnackBar(
+        context,
+        'Invoice #${invoice.invoiceNumber} updated',
+        backgroundColor: AppColors.success,
+      );
+    }
+  }
+
   Future<void> _recordPayment(GarageStore store, Invoice invoice) async {
-    final amountController = TextEditingController(
-      text: invoice.grandTotal.toStringAsFixed(0),
-    );
-    var selectedStatus = paymentStatusForAmount(
-      invoice.grandTotal,
-      invoice.grandTotal,
-    );
+    final amountController = TextEditingController();
+    final noteController = TextEditingController();
 
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final amount = double.tryParse(amountController.text.trim()) ?? 0;
-          final suggested = paymentStatusForAmount(amount, invoice.grandTotal);
+          final history = store.paymentsForInvoice(invoice.id);
           return AlertDialog(
-            title: Text('Payment · Invoice #${invoice.invoiceNumber}'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Bill total: ${formatAmount(invoice.grandTotal)} · '
-                  'Paid so far: ${formatAmount(invoice.amountPaid)} · '
-                  'Balance: ${formatAmount(invoice.balanceAmount)}',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: amountController,
-                  label: 'Total amount paid *',
-                  expand: true,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) => setDialogState(() {
-                    selectedStatus = paymentStatusForAmount(
-                      double.tryParse(amountController.text.trim()) ?? 0,
-                      invoice.grandTotal,
-                    );
-                  }),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<PaymentStatus>(
-                  value: selectedStatus,
-                  decoration: const InputDecoration(labelText: 'Payment status'),
-                  items: PaymentStatus.values
-                      .map(
-                        (status) => DropdownMenuItem(
-                          value: status,
-                          child: Text(status.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setDialogState(() => selectedStatus = value);
-                  },
-                ),
-                if (suggested != selectedStatus)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Suggested: ${suggested.label} based on amount',
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                      ),
+            title: Text('Record Payment · Invoice #${invoice.invoiceNumber}'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Bill total: ${formatAmount(invoice.grandTotal)} · '
+                      'Paid so far: ${formatAmount(invoice.amountPaid)} · '
+                      'Balance: ${formatAmount(invoice.balanceAmount)}',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                     ),
-                  ),
-              ],
+                    if (store.customerAdvanceBalance(invoice.customerId) > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Advance on account: '
+                        '${formatAmount(store.customerAdvanceBalance(invoice.customerId))}',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      controller: amountController,
+                      label: 'Amount received now (₹) *',
+                      expand: true,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      hint: 'e.g. 10000',
+                    ),
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      controller: noteController,
+                      label: 'Note (optional)',
+                      expand: true,
+                      hint: 'Cash / UPI',
+                    ),
+                    if (history.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Payment history',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...history.map(
+                        (payment) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${DateFormat('dd MMM yyyy').format(payment.createdAt)}'
+                                  '${payment.note.isNotEmpty ? ' · ${payment.note}' : ''}',
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                              ),
+                              Text(
+                                formatAmount(payment.amount),
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
             actions: [
               TextButton(
@@ -1991,20 +2194,24 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
     if (saved != true) {
       amountController.dispose();
+      noteController.dispose();
       return;
     }
 
-    final totalPaid = double.tryParse(amountController.text.trim()) ?? 0;
+    final amount = double.tryParse(amountController.text.trim()) ?? 0;
+    final note = noteController.text.trim();
     amountController.dispose();
-    if (totalPaid < 0) {
+    noteController.dispose();
+    if (amount <= 0) {
       showAppSnackBar(context, 'Enter a valid amount');
       return;
     }
 
-    final error = await store.updateInvoicePayment(
+    final error = await store.recordPaymentReceipt(
+      customerId: invoice.customerId,
       invoiceId: invoice.id,
-      amountPaid: totalPaid,
-      paymentStatus: selectedStatus,
+      amount: amount,
+      note: note,
     );
 
     if (!mounted) return;
@@ -2014,7 +2221,43 @@ class _InvoicesPageState extends State<InvoicesPage> {
     }
     showAppSnackBar(
       context,
-      'Payment recorded for invoice #${invoice.invoiceNumber}',
+      'Payment of ${formatAmount(amount)} recorded',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _applyAdvancesToInvoice(
+    GarageStore store,
+    Invoice invoice,
+  ) async {
+    final advances = store.advancesForCustomer(invoice.customerId);
+    if (advances.isEmpty) {
+      showAppSnackBar(context, 'No advance on account for this customer');
+      return;
+    }
+
+    for (final advance in advances) {
+      final current = store.invoices
+          .where((item) => item.id == invoice.id)
+          .firstOrNull;
+      if (current == null || current.balanceAmount <= 0) {
+        break;
+      }
+      final error = await store.applyAdvanceToInvoice(
+        paymentId: advance.id,
+        invoiceId: invoice.id,
+      );
+      if (error != null) {
+        if (!mounted) return;
+        showAppSnackBar(context, error);
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    showAppSnackBar(
+      context,
+      'Advance applied to invoice #${invoice.invoiceNumber}',
       backgroundColor: AppColors.success,
     );
   }
@@ -2023,10 +2266,15 @@ class _InvoicesPageState extends State<InvoicesPage> {
     if (invoice.paymentStatus == PaymentStatus.paid) {
       return;
     }
-    final error = await store.updateInvoicePayment(
+    final balance = invoice.balanceAmount;
+    if (balance <= 0) {
+      return;
+    }
+    final error = await store.recordPaymentReceipt(
+      customerId: invoice.customerId,
       invoiceId: invoice.id,
-      amountPaid: invoice.grandTotal,
-      paymentStatus: PaymentStatus.paid,
+      amount: balance,
+      note: 'Marked fully paid',
     );
     if (!mounted) return;
     if (error != null) {
@@ -2084,6 +2332,9 @@ class _InvoicesPageState extends State<InvoicesPage> {
                 else
                   ...invoices.map((invoice) {
                     final isPaid = invoice.paymentStatus == PaymentStatus.paid;
+                    final advanceBalance =
+                        store.customerAdvanceBalance(invoice.customerId);
+                    final paymentHistory = store.paymentsForInvoice(invoice.id);
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
                       clipBehavior: Clip.antiAlias,
@@ -2140,11 +2391,27 @@ class _InvoicesPageState extends State<InvoicesPage> {
                                 ),
                               ],
                             ),
+                            if (paymentHistory.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Payments: ${paymentHistory.map((p) => formatAmount(p.amount)).join(', ')}',
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 12),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
                               children: [
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _editInvoice(context, store, invoice),
+                                  icon: const Icon(Icons.edit_outlined, size: 18),
+                                  label: const Text('Edit'),
+                                ),
                                 OutlinedButton.icon(
                                   onPressed: () async {
                                     await Printing.layoutPdf(
@@ -2162,6 +2429,15 @@ class _InvoicesPageState extends State<InvoicesPage> {
                                   label: const Text('Print'),
                                 ),
                                 if (!isPaid) ...[
+                                  if (advanceBalance > 0)
+                                    OutlinedButton.icon(
+                                      onPressed: () =>
+                                          _applyAdvancesToInvoice(store, invoice),
+                                      icon: const Icon(Icons.savings_outlined, size: 18),
+                                      label: Text(
+                                        'Apply Advance (${formatAmount(advanceBalance)})',
+                                      ),
+                                    ),
                                   OutlinedButton.icon(
                                     onPressed: () =>
                                         _recordPayment(store, invoice),

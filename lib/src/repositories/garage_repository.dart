@@ -66,15 +66,40 @@ class GarageRepository {
     required String mobile,
     required String address,
   }) async {
+    final normalizedMobile = normalizeMobile(mobile);
+    final existing = await findCustomerByMobile(normalizedMobile);
+    if (existing != null) {
+      throw StateError(
+        'Party already exists: ${existing.name} (${existing.mobile})',
+      );
+    }
+
     final ref = _db.collection('customers').doc();
     final customer = Customer(
       id: ref.id,
       name: name,
-      mobile: mobile,
+      mobile: normalizedMobile,
       address: address,
     );
     await ref.set(customer.toMap());
     return customer;
+  }
+
+  Future<Customer?> findCustomerByMobile(String mobile) async {
+    final normalizedMobile = normalizeMobile(mobile);
+    if (normalizedMobile.isEmpty) {
+      return null;
+    }
+    final snapshot = await _db
+        .collection('customers')
+        .where('mobile', isEqualTo: normalizedMobile)
+        .limit(1)
+        .get();
+    if (snapshot.docs.isEmpty) {
+      return null;
+    }
+    final doc = snapshot.docs.first;
+    return Customer.fromMap(doc.id, doc.data());
   }
 
   Stream<List<Vehicle>> watchVehicles() {
@@ -344,6 +369,66 @@ class GarageRepository {
     }
   }
 
+  Future<String?> updateInvoice({
+    required String invoiceId,
+    required List<InvoiceLineDraft> labourItems,
+    required List<PartLineDraft> partsItems,
+    required Iterable<StockItem> stockItems,
+  }) async {
+    if (labourItems.isEmpty && partsItems.isEmpty) {
+      return 'Add at least one labour item or part';
+    }
+
+    try {
+      await _db.runTransaction((transaction) async {
+        final invoiceRef = _db.doc('invoices/$invoiceId');
+        final invoiceSnap = await transaction.get(invoiceRef);
+        if (!invoiceSnap.exists || invoiceSnap.data() == null) {
+          throw _InvoiceException('Invoice not found');
+        }
+
+        final existing = Invoice.fromMap(invoiceId, invoiceSnap.data()!);
+        final partRecords = _partRecordsFromDrafts(partsItems, stockItems);
+        final stockSnaps = await _readStockSnapshots(
+          transaction,
+          [...existing.partsItems, ...partRecords],
+        );
+
+        _applyInvoiceStockAdjustment(
+          transaction: transaction,
+          invoiceId: invoiceId,
+          oldParts: existing.partsItems,
+          newParts: partRecords,
+          stockSnaps: stockSnaps,
+        );
+
+        final labourTotal =
+            labourItems.fold<double>(0, (sum, item) => sum + item.amount);
+        final partsTotal =
+            partRecords.fold<double>(0, (sum, item) => sum + item.amount);
+        final grandTotal = labourTotal + partsTotal;
+        final clampedPaid =
+            existing.amountPaid.clamp(0, grandTotal).toDouble();
+        final resolvedStatus =
+            paymentStatusForAmount(clampedPaid, grandTotal);
+
+        transaction.update(invoiceRef, {
+          'labourItems': labourItems.map((item) => item.toMap()).toList(),
+          'partsItems': partRecords.map((item) => item.toMap()).toList(),
+          'labourTotal': labourTotal,
+          'partsTotal': partsTotal,
+          'amountPaid': clampedPaid,
+          'paymentStatus': resolvedStatus.name,
+        });
+      });
+      return null;
+    } on _InvoiceException catch (error) {
+      return error.message;
+    } catch (error) {
+      return 'Could not update invoice: $error';
+    }
+  }
+
   Future<bool> updateEstimate({
     required String id,
     required List<InvoiceLineDraft> labourItems,
@@ -408,6 +493,103 @@ class GarageRepository {
         .limit(200)
         .snapshots()
         .map(_mapStockTransactions);
+  }
+
+  Stream<List<PaymentRecord>> watchPayments() {
+    return _db
+        .collection('payments')
+        .orderBy('createdAt', descending: true)
+        .limit(500)
+        .snapshots()
+        .map(_mapPayments);
+  }
+
+  Future<String?> addPaymentReceipt({
+    required String customerId,
+    String? invoiceId,
+    required double amount,
+    String note = '',
+  }) async {
+    if (amount <= 0) {
+      return 'Enter a valid amount';
+    }
+    try {
+      final ref = _db.collection('payments').doc();
+      await ref.set(
+        PaymentRecord(
+          id: ref.id,
+          customerId: customerId,
+          invoiceId: invoiceId,
+          amount: amount,
+          note: note,
+          createdAt: DateTime.now(),
+        ).toMap(),
+      );
+      if (invoiceId != null) {
+        await _syncInvoicePaymentFromRecords(invoiceId);
+      }
+      return null;
+    } catch (error) {
+      return 'Could not record payment: $error';
+    }
+  }
+
+  Future<String?> applyAdvanceToInvoice({
+    required String paymentId,
+    required String invoiceId,
+  }) async {
+    try {
+      final paymentRef = _db.doc('payments/$paymentId');
+      final paymentSnap = await paymentRef.get();
+      if (!paymentSnap.exists || paymentSnap.data() == null) {
+        return 'Advance payment not found';
+      }
+      final payment = PaymentRecord.fromMap(paymentId, paymentSnap.data()!);
+      if (!payment.isAdvance) {
+        return 'Payment is already linked to a bill';
+      }
+
+      final invoiceSnap = await _db.doc('invoices/$invoiceId').get();
+      if (!invoiceSnap.exists || invoiceSnap.data() == null) {
+        return 'Invoice not found';
+      }
+      final invoice = Invoice.fromMap(invoiceId, invoiceSnap.data()!);
+      if (invoice.customerId != payment.customerId) {
+        return 'Advance belongs to a different customer';
+      }
+      if (invoice.balanceAmount <= 0) {
+        return 'Invoice is already fully paid';
+      }
+
+      await paymentRef.update({'invoiceId': invoiceId});
+      await _syncInvoicePaymentFromRecords(invoiceId);
+      return null;
+    } catch (error) {
+      return 'Could not apply advance: $error';
+    }
+  }
+
+  Future<void> _syncInvoicePaymentFromRecords(String invoiceId) async {
+    final snapshot = await _db
+        .collection('payments')
+        .where('invoiceId', isEqualTo: invoiceId)
+        .get();
+    final totalPaid = snapshot.docs.fold<double>(
+      0,
+      (sum, doc) => sum + ((doc.data()['amount'] as num?)?.toDouble() ?? 0),
+    );
+
+    final invoiceSnap = await _db.doc('invoices/$invoiceId').get();
+    if (!invoiceSnap.exists || invoiceSnap.data() == null) {
+      return;
+    }
+    final invoice = Invoice.fromMap(invoiceId, invoiceSnap.data()!);
+    final clampedPaid = totalPaid.clamp(0, invoice.grandTotal).toDouble();
+    final status = paymentStatusForAmount(clampedPaid, invoice.grandTotal);
+    await _db.doc('invoices/$invoiceId').update({
+      'amountPaid': clampedPaid,
+      'paymentStatus': status.name,
+    });
   }
 
   Future<String?> convertJobCardToInvoice({
@@ -581,6 +763,74 @@ class GarageRepository {
     return snap.data()!['regNumber'] as String? ?? 'Unknown vehicle';
   }
 
+  void _applyInvoiceStockAdjustment({
+    required Transaction transaction,
+    required String invoiceId,
+    required List<InvoicePartLine> oldParts,
+    required List<InvoicePartLine> newParts,
+    required Map<String, DocumentSnapshot<Map<String, dynamic>>> stockSnaps,
+  }) {
+    final oldTotals = <String, int>{};
+    for (final part in oldParts) {
+      oldTotals[part.stockItemId] =
+          (oldTotals[part.stockItemId] ?? 0) + part.qty;
+    }
+    final newTotals = <String, int>{};
+    for (final part in newParts) {
+      newTotals[part.stockItemId] = (newTotals[part.stockItemId] ?? 0) + part.qty;
+    }
+
+    final stockIds = {...oldTotals.keys, ...newTotals.keys};
+    for (final stockId in stockIds) {
+      final oldQty = oldTotals[stockId] ?? 0;
+      final newQty = newTotals[stockId] ?? 0;
+      final netChange = newQty - oldQty;
+      if (netChange == 0) {
+        continue;
+      }
+
+      final snap = stockSnaps[stockId];
+      if (snap == null || !snap.exists || snap.data() == null) {
+        if (netChange > 0) {
+          throw _InvoiceException('Stock item $stockId missing');
+        }
+        continue;
+      }
+
+      final current = (snap.data()!['currentStock'] as num?)?.toInt() ?? 0;
+      if (netChange > 0) {
+        if (current < netChange) {
+          final name = snap.data()!['name'] as String? ?? stockId;
+          throw _InvoiceException('Insufficient stock for $name');
+        }
+        transaction.update(snap.reference, {
+          'currentStock': current - netChange,
+        });
+        transaction.set(_db.collection('stock_transactions').doc(), {
+          'stockItemId': stockId,
+          'type': 'out',
+          'qty': netChange,
+          'referenceType': 'invoice_edit',
+          'referenceId': invoiceId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        final returnQty = -netChange;
+        transaction.update(snap.reference, {
+          'currentStock': current + returnQty,
+        });
+        transaction.set(_db.collection('stock_transactions').doc(), {
+          'stockItemId': stockId,
+          'type': 'in',
+          'qty': returnQty,
+          'referenceType': 'invoice_edit',
+          'referenceId': invoiceId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  }
+
   void _applyStockDeduction({
     required Transaction transaction,
     required List<InvoicePartLine> partsItems,
@@ -670,6 +920,12 @@ class GarageRepository {
   ) {
     return snapshot.docs
         .map((doc) => StockTransaction.fromMap(doc.id, doc.data()))
+        .toList();
+  }
+
+  List<PaymentRecord> _mapPayments(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    return snapshot.docs
+        .map((doc) => PaymentRecord.fromMap(doc.id, doc.data()))
         .toList();
   }
 

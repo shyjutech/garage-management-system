@@ -1048,7 +1048,7 @@ class _PartySearchFieldState extends State<PartySearchField> {
   @override
   void initState() {
     super.initState();
-    _focusNode = FocusNode();
+    _focusNode = FocusNode()..addListener(() => setState(() {}));
   }
 
   @override
@@ -1069,7 +1069,11 @@ class _PartySearchFieldState extends State<PartySearchField> {
         textEditingController: widget.controller,
         focusNode: _focusNode,
         optionsBuilder: (textEditingValue) {
-          return widget.optionsBuilder(textEditingValue.text).take(10);
+          final query = textEditingValue.text;
+          if (query.trim().isEmpty && !_focusNode.hasFocus) {
+            return const Iterable<Customer>.empty();
+          }
+          return widget.optionsBuilder(query).take(10);
         },
         onSelected: widget.onSelected,
         displayStringForOption: (customer) => customer.name,

@@ -429,6 +429,10 @@ class Invoice {
       (grandTotal - amountPaid).clamp(0, grandTotal).toDouble();
 
   Invoice copyWith({
+    List<InvoiceLineDraft>? labourItems,
+    List<InvoicePartLine>? partsItems,
+    double? labourTotal,
+    double? partsTotal,
     double? amountPaid,
     PaymentStatus? paymentStatus,
   }) {
@@ -440,10 +444,10 @@ class Invoice {
       vehicleId: vehicleId,
       vehicleNumber: vehicleNumber,
       kmReading: kmReading,
-      labourItems: labourItems,
-      partsItems: partsItems,
-      labourTotal: labourTotal,
-      partsTotal: partsTotal,
+      labourItems: labourItems ?? this.labourItems,
+      partsItems: partsItems ?? this.partsItems,
+      labourTotal: labourTotal ?? this.labourTotal,
+      partsTotal: partsTotal ?? this.partsTotal,
       amountPaid: amountPaid ?? this.amountPaid,
       paymentStatus: paymentStatus ?? this.paymentStatus,
       createdAt: createdAt,
@@ -750,6 +754,57 @@ class StockTransaction {
       referenceType: data['referenceType'] as String? ?? '',
       referenceId: data['referenceId'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+}
+
+/// Cash received from a customer — linked to an invoice or held as advance.
+class PaymentRecord {
+  const PaymentRecord({
+    required this.id,
+    required this.customerId,
+    this.invoiceId,
+    required this.amount,
+    required this.note,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String customerId;
+  final String? invoiceId;
+  final double amount;
+  final String note;
+  final DateTime createdAt;
+
+  bool get isAdvance => invoiceId == null || invoiceId!.isEmpty;
+
+  factory PaymentRecord.fromMap(String id, Map<String, dynamic> data) {
+    return PaymentRecord(
+      id: id,
+      customerId: data['customerId'] as String? ?? '',
+      invoiceId: data['invoiceId'] as String?,
+      amount: (data['amount'] as num?)?.toDouble() ?? 0,
+      note: data['note'] as String? ?? '',
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'customerId': customerId,
+        if (invoiceId != null) 'invoiceId': invoiceId,
+        'amount': amount,
+        'note': note,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+  PaymentRecord copyWith({String? invoiceId}) {
+    return PaymentRecord(
+      id: id,
+      customerId: customerId,
+      invoiceId: invoiceId ?? this.invoiceId,
+      amount: amount,
+      note: note,
+      createdAt: createdAt,
     );
   }
 }
