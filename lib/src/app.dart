@@ -1,22 +1,21 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/pages/job_cards_page.dart';
 import 'package:garage_management_system/src/pages/parties_list_page.dart';
+import 'package:garage_management_system/src/pages/record_advance_page.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
-import 'package:garage_management_system/src/utils/garage_utils.dart';
 import 'package:garage_management_system/src/utils/browser_cache_clearer.dart';
+import 'package:garage_management_system/src/utils/estimate_pdf.dart';
+import 'package:garage_management_system/src/utils/garage_utils.dart';
+import 'package:garage_management_system/src/utils/invoice_pdf.dart';
 import 'package:garage_management_system/src/widgets/estimate_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/invoice_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/ui_components.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,6 +29,7 @@ enum AppSection {
   jobCards,
   estimates,
   invoices,
+  advances,
   help,
   settings,
 }
@@ -56,6 +56,7 @@ class _HomeShellState extends State<HomeShell> {
     (AppSection.jobCards, Icons.build_circle_rounded, 'Job Cards'),
     (AppSection.estimates, Icons.request_quote_rounded, 'Estimates'),
     (AppSection.invoices, Icons.receipt_long_rounded, 'Invoices'),
+    (AppSection.advances, Icons.savings_outlined, 'Advance'),
     (AppSection.help, Icons.help_outline_rounded, 'Help'),
     (AppSection.settings, Icons.settings_rounded, 'Settings'),
   ];
@@ -240,6 +241,7 @@ class _HomeShellState extends State<HomeShell> {
       AppSection.jobCards: JobCardsPage(onEstimateSaved: _goToEstimates),
       AppSection.estimates: const EstimatesPage(),
       AppSection.invoices: const InvoicesPage(),
+      AppSection.advances: const RecordAdvancePage(),
       AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
@@ -706,8 +708,6 @@ class _PartiesPageState extends State<PartiesPage> {
   final brand = TextEditingController();
   final model = TextEditingController();
   final year = TextEditingController();
-  final advanceAmount = TextEditingController();
-  final advanceNote = TextEditingController();
 
   @override
   void dispose() {
@@ -719,8 +719,6 @@ class _PartiesPageState extends State<PartiesPage> {
     brand.dispose();
     model.dispose();
     year.dispose();
-    advanceAmount.dispose();
-    advanceNote.dispose();
     super.dispose();
   }
 
@@ -792,37 +790,6 @@ class _PartiesPageState extends State<PartiesPage> {
         )
         .firstOrNull;
     setState(() => selectedCustomerId = match?.id);
-  }
-
-  Future<void> _recordAdvance(GarageStore store) async {
-    if (selectedCustomerId == null) {
-      showAppSnackBar(context, 'Select a party first.');
-      return;
-    }
-    final amount = double.tryParse(advanceAmount.text.trim()) ?? 0;
-    if (amount <= 0) {
-      showAppSnackBar(context, 'Enter a valid advance amount');
-      return;
-    }
-    final error = await store.recordPaymentReceipt(
-      customerId: selectedCustomerId!,
-      amount: amount,
-      note: advanceNote.text.trim(),
-    );
-    if (!mounted) {
-      return;
-    }
-    if (error != null) {
-      showAppSnackBar(context, error);
-      return;
-    }
-    advanceAmount.clear();
-    advanceNote.clear();
-    showAppSnackBar(
-      context,
-      'Advance ${formatAmount(amount)} recorded',
-      backgroundColor: AppColors.success,
-    );
   }
 
   Future<void> _addVehicle(GarageStore store) async {
@@ -936,67 +903,6 @@ class _PartiesPageState extends State<PartiesPage> {
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          SectionCard(
-            title: 'Record Advance',
-            icon: Icons.savings_outlined,
-            subtitle: 'Customer pays before final bill — e.g. ₹10,000 at a time',
-            child: store.customers.isEmpty
-                ? const Text(
-                    'Add a party first to record advances.',
-                    style: TextStyle(color: AppColors.textMuted),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      PartySearchField(
-                        controller: partySearch,
-                        expand: true,
-                        optionsBuilder: store.searchCustomers,
-                        onSelected: _selectParty,
-                        onChanged: (value) => _onPartySearchChanged(store, value),
-                      ),
-                      if (selectedCustomerId != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Advance on account: '
-                          '${formatAmount(store.customerAdvanceBalance(selectedCustomerId!))}',
-                          style: const TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      AppFormRow(
-                        children: [
-                          AppTextField(
-                            controller: advanceAmount,
-                            label: 'Amount received now (₹) *',
-                            expand: true,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(decimal: true),
-                            hint: 'e.g. 10000',
-                          ),
-                          AppTextField(
-                            controller: advanceNote,
-                            label: 'Note (optional)',
-                            expand: true,
-                            hint: 'Cash / UPI / date',
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: selectedCustomerId == null
-                            ? null
-                            : () => _recordAdvance(store),
-                        icon: const Icon(Icons.add_card_rounded, size: 20),
-                        label: const Text('Record Advance'),
-                      ),
-                    ],
-                  ),
           ),
           const SizedBox(height: 16),
           SectionCard(
@@ -2954,501 +2860,4 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-}
-
-
-Future<Uint8List> buildInvoicePdf({
-  required Invoice invoice,
-  required GarageStore store,
-  required PdfPageFormat format,
-}) async {
-  final pdf = pw.Document();
-  final customer = store.customers
-          .where((item) => item.id == invoice.customerId)
-          .firstOrNull ??
-      const Customer(id: 'NA', name: 'Unknown', mobile: '-', address: '-');
-  final vehicle = store.vehicles
-          .where((item) => item.id == invoice.vehicleId)
-          .firstOrNull ??
-      const Vehicle(
-        id: 'NA',
-        customerId: 'NA',
-        regNumber: '-',
-        regNumberNormalized: '-',
-        brand: '-',
-        model: '-',
-        year: 0,
-        lastKmReading: 0,
-      );
-  final s = store.settings;
-
-  pw.Widget headerCell(String title, String value) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 4),
-      child: pw.Row(
-        children: [
-          pw.SizedBox(width: 90, child: pw.Text(title, style: const pw.TextStyle(fontSize: 9))),
-          pw.Expanded(child: pw.Text(value, style: const pw.TextStyle(fontSize: 9))),
-        ],
-      ),
-    );
-  }
-
-  pdf.addPage(
-    pw.Page(
-      pageFormat: format,
-      build: (context) {
-        return pw.Container(
-          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey700)),
-          padding: const pw.EdgeInsets.all(12),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(s.businessName,
-                  style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
-              pw.Text(s.tagline),
-              pw.Text('${s.phone}'),
-              pw.Text(s.address),
-              pw.SizedBox(height: 8),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text('Date: ${DateFormat('dd-MM-yyyy').format(invoice.createdAt)}'),
-              ),
-              pw.SizedBox(height: 8),
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(8),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey500),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text('CUSTOMER INFO',
-                              style: pw.TextStyle(
-                                  color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
-                          pw.SizedBox(height: 6),
-                          headerCell('Name', customer.name),
-                          headerCell('Address', customer.address),
-                          headerCell('Mobile', customer.mobile),
-                        ],
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(width: 8),
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(8),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey500),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text('VEHICLE INFO',
-                              style: pw.TextStyle(
-                                  color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
-                          pw.SizedBox(height: 6),
-                          headerCell('Make', vehicle.brand),
-                          headerCell('Model', vehicle.model),
-                          headerCell('Year', '${vehicle.year}'),
-                          headerCell('Reg No', vehicle.regNumber),
-                          headerCell('Mileage', '${invoice.kmReading}'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 12),
-              pw.Text('JOB PERFORMED',
-                  style: pw.TextStyle(color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey500),
-                columnWidths: const {
-                  0: pw.FlexColumnWidth(4),
-                  1: pw.FlexColumnWidth(1.2),
-                },
-                children: [
-                  ...invoice.labourItems.map(
-                    (line) => pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.description),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Align(
-                            alignment: pw.Alignment.centerRight,
-                            child: pw.Text(line.amount.toStringAsFixed(2)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 6),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text('SUB TOTAL: ${invoice.labourTotal.toStringAsFixed(2)}'),
-              ),
-              pw.SizedBox(height: 12),
-              pw.Text('PARTS',
-                  style: pw.TextStyle(color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey500),
-                columnWidths: const {
-                  0: pw.FlexColumnWidth(3),
-                  1: pw.FlexColumnWidth(1),
-                  2: pw.FlexColumnWidth(1.2),
-                  3: pw.FlexColumnWidth(1.2),
-                },
-                children: [
-                  ...invoice.partsItems.map(
-                    (line) => pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.name),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text('${line.qty}'),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.unitPrice.toStringAsFixed(2)),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Align(
-                            alignment: pw.Alignment.centerRight,
-                            child: pw.Text(line.amount.toStringAsFixed(2)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 6),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text('SUB TOTAL: ${invoice.partsTotal.toStringAsFixed(2)}'),
-              ),
-              pw.Spacer(),
-              pw.Row(
-                children: [
-                  pw.Expanded(child: pw.Text('COMMENTS')),
-                  pw.SizedBox(
-                    width: 180,
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text('TOTAL LABOUR: ${invoice.labourTotal.toStringAsFixed(2)}'),
-                        pw.Text('TOTAL PARTS: ${invoice.partsTotal.toStringAsFixed(2)}'),
-                        pw.Text('TOTAL: ${invoice.grandTotal.toStringAsFixed(2)}',
-                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-  return pdf.save();
-}
-
-Future<Uint8List> buildEstimatePdf({
-  required Estimate estimate,
-  required GarageStore store,
-  required PdfPageFormat format,
-}) async {
-  final pdf = pw.Document();
-  final customer = store.customers
-          .where((item) => item.id == estimate.customerId)
-          .firstOrNull ??
-      const Customer(id: 'NA', name: 'Unknown', mobile: '-', address: '-');
-  final vehicle = store.vehicles
-          .where((item) => item.id == estimate.vehicleId)
-          .firstOrNull ??
-      const Vehicle(
-        id: 'NA',
-        customerId: 'NA',
-        regNumber: '-',
-        regNumberNormalized: '-',
-        brand: '-',
-        model: '-',
-        year: 0,
-        lastKmReading: 0,
-      );
-  final s = store.settings;
-
-  pw.Widget headerCell(String title, String value) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 4),
-      child: pw.Row(
-        children: [
-          pw.SizedBox(
-            width: 90,
-            child: pw.Text(title, style: const pw.TextStyle(fontSize: 9)),
-          ),
-          pw.Expanded(
-            child: pw.Text(value, style: const pw.TextStyle(fontSize: 9)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  pdf.addPage(
-    pw.Page(
-      pageFormat: format,
-      build: (context) {
-        return pw.Container(
-          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey700)),
-          padding: const pw.EdgeInsets.all(12),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    s.businessName,
-                    style: pw.TextStyle(
-                      fontSize: 22,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(color: PdfColors.blue800, width: 2),
-                    ),
-                    child: pw.Text(
-                      'ESTIMATE #${estimate.estimateNumber}',
-                      style: pw.TextStyle(
-                        color: PdfColors.blue800,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              pw.Text(s.tagline),
-              pw.Text(s.phone),
-              pw.Text(s.address),
-              pw.SizedBox(height: 8),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  'Date: ${DateFormat('dd-MM-yyyy').format(estimate.createdAt)}',
-                ),
-              ),
-              pw.SizedBox(height: 8),
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(8),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey500),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            'CUSTOMER INFO',
-                            style: pw.TextStyle(
-                              color: PdfColors.blue800,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                          pw.SizedBox(height: 6),
-                          headerCell('Name', customer.name),
-                          headerCell('Address', customer.address),
-                          headerCell('Mobile', customer.mobile),
-                        ],
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(width: 8),
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(8),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey500),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            'VEHICLE INFO',
-                            style: pw.TextStyle(
-                              color: PdfColors.blue800,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                          pw.SizedBox(height: 6),
-                          headerCell('Make', vehicle.brand),
-                          headerCell('Model', vehicle.model),
-                          headerCell('Year', '${vehicle.year}'),
-                          headerCell('Reg No', vehicle.regNumber),
-                          headerCell('Mileage', '${estimate.kmReading}'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 12),
-              pw.Text(
-                'JOB PERFORMED (ESTIMATED)',
-                style: pw.TextStyle(
-                  color: PdfColors.blue800,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey500),
-                columnWidths: const {
-                  0: pw.FlexColumnWidth(4),
-                  1: pw.FlexColumnWidth(1.2),
-                },
-                children: [
-                  ...estimate.labourItems.map(
-                    (line) => pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.description),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Align(
-                            alignment: pw.Alignment.centerRight,
-                            child: pw.Text(line.amount.toStringAsFixed(2)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 6),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  'SUB TOTAL: ${estimate.labourTotal.toStringAsFixed(2)}',
-                ),
-              ),
-              pw.SizedBox(height: 12),
-              pw.Text(
-                'PARTS (ESTIMATED)',
-                style: pw.TextStyle(
-                  color: PdfColors.blue800,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey500),
-                columnWidths: const {
-                  0: pw.FlexColumnWidth(3),
-                  1: pw.FlexColumnWidth(1),
-                  2: pw.FlexColumnWidth(1.2),
-                  3: pw.FlexColumnWidth(1.2),
-                },
-                children: [
-                  ...estimate.partsItems.map(
-                    (line) => pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.name),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text('${line.qty}'),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(line.unitPrice.toStringAsFixed(2)),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Align(
-                            alignment: pw.Alignment.centerRight,
-                            child: pw.Text(line.amount.toStringAsFixed(2)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 6),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  'SUB TOTAL: ${estimate.partsTotal.toStringAsFixed(2)}',
-                ),
-              ),
-              pw.Spacer(),
-              if (estimate.notes.isNotEmpty)
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 8),
-                  child: pw.Text('Notes: ${estimate.notes}'),
-                ),
-              pw.Row(
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      'This is an estimate only. Final bill may vary after inspection.',
-                      style: const pw.TextStyle(
-                        fontSize: 9,
-                        color: PdfColors.grey700,
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(
-                    width: 180,
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          'TOTAL LABOUR: ${estimate.labourTotal.toStringAsFixed(2)}',
-                        ),
-                        pw.Text(
-                          'TOTAL PARTS: ${estimate.partsTotal.toStringAsFixed(2)}',
-                        ),
-                        pw.Text(
-                          'ESTIMATE TOTAL: ${estimate.grandTotal.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-  return pdf.save();
 }
