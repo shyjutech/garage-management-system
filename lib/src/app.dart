@@ -380,6 +380,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final km = TextEditingController();
   final mechanic = TextEditingController();
   final complaints = TextEditingController();
+  final remarks = TextEditingController();
   String fuelLevel = 'Half';
   Vehicle? matchedVehicle;
 
@@ -389,6 +390,7 @@ class _DashboardPageState extends State<DashboardPage> {
     km.dispose();
     mechanic.dispose();
     complaints.dispose();
+    remarks.dispose();
     super.dispose();
   }
 
@@ -433,6 +435,7 @@ class _DashboardPageState extends State<DashboardPage> {
       requestedWorks: '',
       otherNotes: '',
       internalNotes: '',
+      remarks: remarks.text.trim(),
       mechanicName: mechanic.text.trim(),
     );
 
@@ -443,6 +446,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     complaints.clear();
+    remarks.clear();
     mechanic.clear();
     regNumber.clear();
     setState(() => matchedVehicle = null);
@@ -582,6 +586,14 @@ class _DashboardPageState extends State<DashboardPage> {
                     controller: complaints,
                     label: 'Customer complaint *',
                     hint: 'What the customer reported...',
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 12),
+                  AppMultilineField(
+                    controller: remarks,
+                    label: 'Remarks',
+                    hint: 'Optional notes for job card print...',
                     minLines: 2,
                     maxLines: 4,
                   ),

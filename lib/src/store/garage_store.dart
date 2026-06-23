@@ -247,6 +247,7 @@ class GarageStore extends ChangeNotifier {
       requestedWorks: 'Replace timing belt and tensioner',
       otherNotes: '',
       internalNotes: '',
+      remarks: '',
       mechanicName: 'Anoop',
       notify: false,
     );
@@ -260,7 +261,7 @@ class GarageStore extends ChangeNotifier {
         PartLineDraft(stockItemId: stockItems[0].id, qty: 1),
         PartLineDraft(stockItemId: stockItems[1].id, qty: 1),
       ],
-      notes: 'Valid for 7 days',
+      remarks: 'Valid for 7 days',
       notify: false,
     );
     updateJobCardStatus(jobCards.first.id, JobStatus.completed, notify: false);
@@ -601,6 +602,7 @@ class GarageStore extends ChangeNotifier {
     required String requestedWorks,
     required String otherNotes,
     required String internalNotes,
+    String remarks = '',
     required String mechanicName,
     DateTime? estimatedDelivery,
     bool notify = true,
@@ -617,6 +619,7 @@ class GarageStore extends ChangeNotifier {
         requestedWorks: requestedWorks,
         otherNotes: otherNotes,
         internalNotes: internalNotes,
+        remarks: remarks,
         mechanicName: mechanicName,
         estimatedDelivery: estimatedDelivery,
         notify: notify,
@@ -634,6 +637,7 @@ class GarageStore extends ChangeNotifier {
         requestedWorks: requestedWorks,
         otherNotes: otherNotes,
         internalNotes: internalNotes,
+        remarks: remarks,
         mechanicName: mechanicName,
         estimatedDelivery: estimatedDelivery,
       );
@@ -657,6 +661,7 @@ class GarageStore extends ChangeNotifier {
     required String requestedWorks,
     required String otherNotes,
     required String internalNotes,
+    String remarks = '',
     required String mechanicName,
     DateTime? estimatedDelivery,
     bool notify = true,
@@ -674,6 +679,7 @@ class GarageStore extends ChangeNotifier {
       requestedWorks: requestedWorks,
       otherNotes: otherNotes,
       internalNotes: internalNotes,
+      remarks: remarks,
       mechanicName: mechanicName,
       estimatedDelivery: estimatedDelivery,
       status: JobStatus.pending,
@@ -830,6 +836,7 @@ class GarageStore extends ChangeNotifier {
         partsTotal: partsTotal,
         amountPaid: amountPaid,
         paymentStatus: paymentStatus,
+        remarks: jobCard.remarks,
         createdAt: DateTime.now(),
       ),
     );
@@ -866,7 +873,7 @@ class GarageStore extends ChangeNotifier {
     int? kmReading,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
-    String notes = '',
+    String remarks = '',
     bool notify = true,
   }) async {
     if (_repo != null) {
@@ -878,7 +885,7 @@ class GarageStore extends ChangeNotifier {
           kmReading: kmReading,
           labourItems: labourItems,
           partsItems: partsItems,
-          notes: notes,
+          remarks: remarks,
           stockItems: stockItems,
           vehicleNumberFor: vehicleNumber,
         );
@@ -897,7 +904,7 @@ class GarageStore extends ChangeNotifier {
       kmReading: kmReading,
       labourItems: labourItems,
       partsItems: partsItems,
-      notes: notes,
+      remarks: remarks,
       notify: notify,
     );
   }
@@ -909,7 +916,7 @@ class GarageStore extends ChangeNotifier {
     int? kmReading,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
-    String notes = '',
+    String remarks = '',
     bool notify = true,
   }) {
     if (labourItems.isEmpty && partsItems.isEmpty) {
@@ -956,7 +963,7 @@ class GarageStore extends ChangeNotifier {
         partsItems: partRecords,
         labourTotal: labourTotal,
         partsTotal: partsTotal,
-        notes: notes,
+        remarks: remarks,
         status: EstimateStatus.sent,
         createdAt: DateTime.now(),
       ),
@@ -972,7 +979,7 @@ class GarageStore extends ChangeNotifier {
     required String id,
     required List<InvoiceLineDraft> labourLines,
     required List<PartLineDraft> partsItems,
-    String notes = '',
+    String remarks = '',
     bool notify = true,
   }) async {
     if (labourLines.isEmpty && partsItems.isEmpty) {
@@ -985,7 +992,7 @@ class GarageStore extends ChangeNotifier {
           id: id,
           labourItems: labourLines,
           partsItems: partsItems,
-          notes: notes,
+          remarks: remarks,
           stockItems: stockItems,
         );
       } catch (error) {
@@ -1017,7 +1024,7 @@ class GarageStore extends ChangeNotifier {
       partsItems: partRecords,
       labourTotal: labourTotal,
       partsTotal: partsTotal,
-      notes: notes,
+      remarks: remarks,
     );
     if (notify) {
       notifyListeners();
@@ -1319,6 +1326,7 @@ class GarageStore extends ChangeNotifier {
     required String invoiceId,
     required List<InvoiceLineDraft> labourLines,
     required List<PartLineDraft> partsItems,
+    String remarks = '',
     bool notify = true,
   }) async {
     if (labourLines.isEmpty && partsItems.isEmpty) {
@@ -1331,6 +1339,7 @@ class GarageStore extends ChangeNotifier {
         invoiceId: invoiceId,
         labourItems: labourLines,
         partsItems: partsItems,
+        remarks: remarks,
         stockItems: stockItems,
       );
       if (error != null) {
@@ -1377,6 +1386,7 @@ class GarageStore extends ChangeNotifier {
       partsTotal: partsTotal,
       amountPaid: clampedPaid,
       paymentStatus: resolvedStatus,
+      remarks: remarks,
     );
     if (notify) {
       notifyListeners();
@@ -1484,6 +1494,7 @@ class GarageStore extends ChangeNotifier {
         partsTotal: estimate.partsTotal,
         amountPaid: 0,
         paymentStatus: PaymentStatus.unpaid,
+        remarks: estimate.remarks,
         createdAt: DateTime.now(),
       ),
     );

@@ -209,6 +209,7 @@ class JobCard {
     required this.requestedWorks,
     required this.otherNotes,
     required this.internalNotes,
+    this.remarks = '',
     required this.mechanicName,
     required this.estimatedDelivery,
     required this.status,
@@ -227,6 +228,7 @@ class JobCard {
   final String requestedWorks;
   final String otherNotes;
   final String internalNotes;
+  final String remarks;
   final String mechanicName;
   final DateTime? estimatedDelivery;
   final JobStatus status;
@@ -247,6 +249,7 @@ class JobCard {
     String? requestedWorks,
     String? otherNotes,
     String? internalNotes,
+    String? remarks,
     String? mechanicName,
     DateTime? estimatedDelivery,
     JobStatus? status,
@@ -265,6 +268,7 @@ class JobCard {
       requestedWorks: requestedWorks ?? this.requestedWorks,
       otherNotes: otherNotes ?? this.otherNotes,
       internalNotes: internalNotes ?? this.internalNotes,
+      remarks: remarks ?? this.remarks,
       mechanicName: mechanicName ?? this.mechanicName,
       estimatedDelivery: estimatedDelivery ?? this.estimatedDelivery,
       status: status ?? this.status,
@@ -287,6 +291,7 @@ class JobCard {
       requestedWorks: data['requestedWorks'] as String? ?? '',
       otherNotes: data['otherNotes'] as String? ?? '',
       internalNotes: data['internalNotes'] as String? ?? '',
+      remarks: data['remarks'] as String? ?? '',
       mechanicName: data['mechanicName'] as String? ?? '',
       estimatedDelivery: delivery is Timestamp
           ? delivery.toDate()
@@ -310,6 +315,7 @@ class JobCard {
         'requestedWorks': requestedWorks,
         'otherNotes': otherNotes,
         'internalNotes': internalNotes,
+        'remarks': remarks,
         'mechanicName': mechanicName,
         'estimatedDelivery': estimatedDelivery == null
             ? null
@@ -406,6 +412,7 @@ class Invoice {
     required this.partsTotal,
     required this.amountPaid,
     required this.paymentStatus,
+    this.remarks = '',
     required this.createdAt,
   });
 
@@ -422,6 +429,7 @@ class Invoice {
   final double partsTotal;
   final double amountPaid;
   final PaymentStatus paymentStatus;
+  final String remarks;
   final DateTime createdAt;
 
   double get grandTotal => labourTotal + partsTotal;
@@ -435,6 +443,7 @@ class Invoice {
     double? partsTotal,
     double? amountPaid,
     PaymentStatus? paymentStatus,
+    String? remarks,
   }) {
     return Invoice(
       id: id,
@@ -450,6 +459,7 @@ class Invoice {
       partsTotal: partsTotal ?? this.partsTotal,
       amountPaid: amountPaid ?? this.amountPaid,
       paymentStatus: paymentStatus ?? this.paymentStatus,
+      remarks: remarks ?? this.remarks,
       createdAt: createdAt,
     );
   }
@@ -469,6 +479,7 @@ class Invoice {
       partsTotal: (data['partsTotal'] as num?)?.toDouble() ?? 0,
       amountPaid: (data['amountPaid'] as num?)?.toDouble() ?? 0,
       paymentStatus: paymentStatusFromFirestore(data['paymentStatus'] as String?),
+      remarks: data['remarks'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -487,7 +498,7 @@ class Estimate {
     required this.partsItems,
     required this.labourTotal,
     required this.partsTotal,
-    required this.notes,
+    this.remarks = '',
     required this.status,
     required this.createdAt,
   });
@@ -503,7 +514,7 @@ class Estimate {
   final List<InvoicePartLine> partsItems;
   final double labourTotal;
   final double partsTotal;
-  final String notes;
+  final String remarks;
   final EstimateStatus status;
   final DateTime createdAt;
 
@@ -521,7 +532,7 @@ class Estimate {
     List<InvoicePartLine>? partsItems,
     double? labourTotal,
     double? partsTotal,
-    String? notes,
+    String? remarks,
     EstimateStatus? status,
     DateTime? createdAt,
   }) {
@@ -537,7 +548,7 @@ class Estimate {
       partsItems: partsItems ?? this.partsItems,
       labourTotal: labourTotal ?? this.labourTotal,
       partsTotal: partsTotal ?? this.partsTotal,
-      notes: notes ?? this.notes,
+      remarks: remarks ?? this.remarks,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -556,7 +567,7 @@ class Estimate {
       partsItems: _parsePartLines(data['partsItems']),
       labourTotal: (data['labourTotal'] as num?)?.toDouble() ?? 0,
       partsTotal: (data['partsTotal'] as num?)?.toDouble() ?? 0,
-      notes: data['notes'] as String? ?? '',
+      remarks: data['remarks'] as String? ?? data['notes'] as String? ?? '',
       status: estimateStatusFromFirestore(data['status'] as String?),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -573,7 +584,7 @@ class Estimate {
         'partsItems': partsItems.map((item) => item.toMap()).toList(),
         'labourTotal': labourTotal,
         'partsTotal': partsTotal,
-        'notes': notes,
+        'remarks': remarks,
         'status': status.name,
         'createdAt': FieldValue.serverTimestamp(),
       };

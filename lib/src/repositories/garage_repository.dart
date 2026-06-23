@@ -218,6 +218,7 @@ class GarageRepository {
     required String requestedWorks,
     required String otherNotes,
     required String internalNotes,
+    String remarks = '',
     required String mechanicName,
     DateTime? estimatedDelivery,
   }) async {
@@ -243,6 +244,7 @@ class GarageRepository {
         requestedWorks: requestedWorks,
         otherNotes: otherNotes,
         internalNotes: internalNotes,
+        remarks: remarks,
         mechanicName: mechanicName,
         estimatedDelivery: estimatedDelivery,
         status: JobStatus.pending,
@@ -279,7 +281,7 @@ class GarageRepository {
     int? kmReading,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
-    String notes = '',
+    String remarks = '',
     required Iterable<StockItem> stockItems,
     required String Function(String vehicleId) vehicleNumberFor,
   }) async {
@@ -337,7 +339,7 @@ class GarageRepository {
         partsItems: partRecords,
         labourTotal: labourTotal,
         partsTotal: partsTotal,
-        notes: notes,
+        remarks: remarks,
         status: EstimateStatus.sent,
         createdAt: DateTime.now(),
       );
@@ -373,6 +375,7 @@ class GarageRepository {
     required String invoiceId,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
+    String remarks = '',
     required Iterable<StockItem> stockItems,
   }) async {
     if (labourItems.isEmpty && partsItems.isEmpty) {
@@ -419,6 +422,7 @@ class GarageRepository {
           'partsTotal': partsTotal,
           'amountPaid': clampedPaid,
           'paymentStatus': resolvedStatus.name,
+          'remarks': remarks,
         });
       });
       return null;
@@ -433,7 +437,7 @@ class GarageRepository {
     required String id,
     required List<InvoiceLineDraft> labourItems,
     required List<PartLineDraft> partsItems,
-    String notes = '',
+    String remarks = '',
     required Iterable<StockItem> stockItems,
   }) async {
     if (labourItems.isEmpty && partsItems.isEmpty) {
@@ -462,7 +466,7 @@ class GarageRepository {
       'partsItems': partRecords.map((item) => item.toMap()).toList(),
       'labourTotal': labourTotal,
       'partsTotal': partsTotal,
-      'notes': notes,
+      'remarks': remarks,
     });
     return true;
   }
@@ -649,6 +653,7 @@ class GarageRepository {
           'grandTotal': labourTotal + partsTotal,
           'amountPaid': amountPaid,
           'paymentStatus': paymentStatus.name,
+          'remarks': jobCard.remarks,
           'createdAt': FieldValue.serverTimestamp(),
         });
 
@@ -714,6 +719,7 @@ class GarageRepository {
           'grandTotal': estimate.grandTotal,
           'amountPaid': 0,
           'paymentStatus': PaymentStatus.unpaid.name,
+          'remarks': estimate.remarks,
           'createdAt': FieldValue.serverTimestamp(),
         });
 

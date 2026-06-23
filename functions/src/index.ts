@@ -134,6 +134,7 @@ export const createInvoiceFromJobCard = onCall(async (request) => {
       grandTotal,
       amountPaid,
       paymentStatus,
+      remarks: (jobCard.remarks as string | undefined) ?? "",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -195,6 +196,8 @@ export const createInvoiceFromEstimate = onCall(async (request) => {
       grandTotal,
       amountPaid: 0,
       paymentStatus: "unpaid",
+      remarks: (estimate.remarks as string | undefined) ??
+        (estimate.notes as string | undefined) ?? "",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
