@@ -85,6 +85,14 @@ class GarageRepository {
     return customer;
   }
 
+  Future<void> updateCustomer(Customer customer) async {
+    await _db.doc('customers/${customer.id}').update(customer.toMap());
+  }
+
+  Future<void> deleteCustomer(String id) async {
+    await _db.doc('customers/$id').delete();
+  }
+
   Future<Customer?> findCustomerByMobile(String mobile) async {
     final normalizedMobile = normalizeMobile(mobile);
     if (normalizedMobile.isEmpty) {
@@ -131,6 +139,14 @@ class GarageRepository {
     );
     await ref.set(vehicle.toMap());
     return vehicle;
+  }
+
+  Future<void> updateVehicle(Vehicle vehicle) async {
+    await _db.doc('vehicles/${vehicle.id}').update(vehicle.toUpdateMap());
+  }
+
+  Future<void> deleteVehicle(String id) async {
+    await _db.doc('vehicles/$id').delete();
   }
 
   Stream<List<StockItem>> watchStockItems() {
@@ -556,6 +572,44 @@ class GarageRepository {
     } catch (error) {
       return 'Could not record payment: $error';
     }
+  }
+
+  Stream<List<Expense>> watchExpenses() {
+    return _db
+        .collection('expenses')
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map(_mapExpenses);
+  }
+
+  Future<String?> addExpense({
+    required String description,
+    required double amount,
+  }) async {
+    if (amount <= 0) {
+      return 'Enter a valid amount';
+    }
+    try {
+      final ref = _db.collection('expenses').doc();
+      await ref.set(
+        Expense(
+          id: ref.id,
+          description: description,
+          amount: amount,
+          createdAt: DateTime.now(),
+        ).toMap(),
+      );
+      return null;
+    } catch (error) {
+      return 'Could not add expense: $error';
+    }
+  }
+
+  List<Expense> _mapExpenses(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    return snapshot.docs
+        .map((doc) => Expense.fromMap(doc.id, doc.data()))
+        .toList();
   }
 
   Future<String?> applyAdvanceToInvoice({

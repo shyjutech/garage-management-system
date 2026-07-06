@@ -127,6 +127,47 @@ class _InvoiceEditorDialogState extends State<InvoiceEditorDialog> {
     }
   }
 
+  /// Qty already queued for [stockItemId] across existing part lines, so
+  /// adding more of the same part checks against total demand, not just the
+  /// new line.
+  int _queuedQtyFor(String stockItemId) {
+    return partLines
+        .where((line) => line.stockItemId == stockItemId)
+        .fold<int>(0, (sum, line) => sum + line.qty);
+  }
+
+  /// Returns an error message if [stockItemId] doesn't have [qty] left in
+  /// stock (after accounting for what's already queued on this invoice), or
+  /// null if the quantity is available.
+  String? _stockShortfallError(GarageStore store, String stockItemId, int qty) {
+    final stock =
+        store.stockItems.where((item) => item.id == stockItemId).firstOrNull;
+    if (stock == null) {
+      return 'That part is no longer in the stock catalog';
+    }
+    final remaining = stock.currentStock - _queuedQtyFor(stockItemId);
+    if (qty > remaining) {
+      return remaining <= 0
+          ? '${stock.name} is out of stock'
+          : 'Only $remaining ${stock.name} left in stock';
+    }
+    return null;
+  }
+
+  void _addPart(GarageStore store) {
+    final stockItemId = partStockItemId;
+    final qty = int.tryParse(partQty.text.trim()) ?? 0;
+    if (stockItemId == null || qty <= 0) {
+      return;
+    }
+    final stockError = _stockShortfallError(store, stockItemId, qty);
+    if (stockError != null) {
+      showAppSnackBar(context, stockError);
+      return;
+    }
+    setState(() => _flushDraftLines(store));
+  }
+
   bool _canSave(GarageStore store) {
     final hasLines = labourLines.isNotEmpty || partLines.isNotEmpty;
     final hasDraft =
@@ -296,7 +337,9 @@ class _InvoiceEditorDialogState extends State<InvoiceEditorDialog> {
                 children: [
                   PartSearchField(
                     controller: partSearch,
-                    items: store.stockItems,
+                    items: store.stockItems
+                        .where((item) => item.currentStock > 0)
+                        .toList(),
                     onSelected: (item) {
                       setState(() {
                         partStockItemId = item.id;
@@ -316,7 +359,7 @@ class _InvoiceEditorDialogState extends State<InvoiceEditorDialog> {
                   OutlinedButton.icon(
                     onPressed: partStockItemId == null
                         ? null
-                        : () => setState(() => _flushDraftLines(store)),
+                        : () => _addPart(store),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Add'),
                   ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/pages/estimate_editor_page.dart';
+import 'package:garage_management_system/src/pages/expenses_page.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/pages/job_cards_page.dart';
 import 'package:garage_management_system/src/pages/parties_list_page.dart';
@@ -30,6 +31,7 @@ enum AppSection {
   estimates,
   invoices,
   advances,
+  expenses,
   help,
   settings,
 }
@@ -57,6 +59,7 @@ class _HomeShellState extends State<HomeShell> {
     (AppSection.estimates, Icons.request_quote_rounded, 'Estimates'),
     (AppSection.invoices, Icons.receipt_long_rounded, 'Invoices'),
     (AppSection.advances, Icons.savings_outlined, 'Advance'),
+    (AppSection.expenses, Icons.currency_rupee_rounded, 'Expenses'),
     (AppSection.help, Icons.help_outline_rounded, 'Help'),
     (AppSection.settings, Icons.settings_rounded, 'Settings'),
   ];
@@ -226,6 +229,14 @@ class _HomeShellState extends State<HomeShell> {
     _selectSection(AppSection.estimates);
   }
 
+  void _goToInvoices() {
+    _selectSection(AppSection.invoices);
+  }
+
+  void _goToStock() {
+    _selectSection(AppSection.stock);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <AppSection, Widget>{
@@ -233,15 +244,17 @@ class _HomeShellState extends State<HomeShell> {
         onJobCardCreated: (_) => _goToJobCards(),
         onOpenJobCards: _goToJobCards,
         onOpenEstimates: _goToEstimates,
+        onOpenStock: _goToStock,
       ),
       AppSection.parties: const PartiesPage(),
       AppSection.history: const VehicleHistoryPage(),
       AppSection.stock: const StockPage(),
       AppSection.labour: const LabourPage(),
       AppSection.jobCards: JobCardsPage(onEstimateSaved: _goToEstimates),
-      AppSection.estimates: const EstimatesPage(),
+      AppSection.estimates: EstimatesPage(onInvoiceCreated: _goToInvoices),
       AppSection.invoices: const InvoicesPage(),
       AppSection.advances: const RecordAdvancePage(),
+      AppSection.expenses: const ExpensesPage(),
       AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
@@ -365,11 +378,13 @@ class DashboardPage extends StatefulWidget {
     this.onJobCardCreated,
     this.onOpenJobCards,
     this.onOpenEstimates,
+    this.onOpenStock,
   });
 
   final void Function(String jobCardId)? onJobCardCreated;
   final VoidCallback? onOpenJobCards;
   final VoidCallback? onOpenEstimates;
+  final VoidCallback? onOpenStock;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -649,14 +664,16 @@ class _DashboardPageState extends State<DashboardPage> {
                 accentColor: AppColors.primary,
                 onTap: widget.onOpenJobCards,
               ),
-              MetricCard(
-                label: 'Low Stock Alerts',
-                value: '${store.lowStockItems.length}',
-                icon: Icons.warning_amber_rounded,
-                accentColor: store.lowStockItems.isEmpty
-                    ? AppColors.success
-                    : AppColors.warning,
-              ),
+              if (store.activeRole == UserRole.admin)
+                MetricCard(
+                  label: 'Low Stock Alerts',
+                  value: '${store.lowStockItems.length}',
+                  icon: Icons.warning_amber_rounded,
+                  accentColor: store.lowStockItems.isEmpty
+                      ? AppColors.success
+                      : AppColors.warning,
+                  onTap: widget.onOpenStock,
+                ),
               MetricCard(
                 label: 'Labour Revenue',
                 value: formatAmount(labourRevenue),
@@ -701,6 +718,18 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+}
+
+/// Disposing a dialog's [TextEditingController]s synchronously right after
+/// `Navigator.pop` races the dialog's closing transition (which still reads
+/// the controller for a frame or two). Deferring to the next frame avoids
+/// the "used after being disposed" assertion.
+void _disposeAfterFrame(List<TextEditingController> controllers) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    for (final controller in controllers) {
+      controller.dispose();
+    }
+  });
 }
 
 class PartiesPage extends StatefulWidget {
@@ -837,6 +866,253 @@ class _PartiesPageState extends State<PartiesPage> {
         backgroundColor: AppColors.success,
       );
     }
+  }
+
+  Future<void> _showEditCustomerDialog(GarageStore store, Customer customer) async {
+    final editName = TextEditingController(text: customer.name);
+    final editMobile = TextEditingController(text: customer.mobile);
+    final editAddress = TextEditingController(text: customer.address);
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit Party'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppTextField(controller: editName, label: 'Name *', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editMobile,
+                label: 'Mobile *',
+                expand: true,
+                keyboardType: TextInputType.phone,
+                maxLength: 10,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 12),
+              AppTextField(controller: editAddress, label: 'Address *', expand: true),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true) {
+      _disposeAfterFrame([editName, editMobile, editAddress]);
+      return;
+    }
+
+    final nameError = FormValidators.requiredText(editName.text, 'Name');
+    final mobileError = FormValidators.mobile(editMobile.text);
+    final addressError = FormValidators.requiredText(editAddress.text, 'Address');
+    final error = nameError ?? mobileError ?? addressError;
+
+    final updated = customer.copyWith(
+      name: editName.text.trim(),
+      mobile: normalizeMobile(editMobile.text),
+      address: editAddress.text.trim(),
+    );
+    _disposeAfterFrame([editName, editMobile, editAddress]);
+
+    if (error != null) {
+      if (mounted) {
+        showAppSnackBar(context, error);
+      }
+      return;
+    }
+
+    final ok = await store.updateCustomer(updated);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not update party');
+      return;
+    }
+    showAppSnackBar(context, 'Party updated', backgroundColor: AppColors.success);
+  }
+
+  Future<void> _confirmDeleteCustomer(GarageStore store, Customer customer) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete party?'),
+        content: Text(
+          'Remove "${customer.name}" permanently? This cannot be undone. '
+          'Their vehicles must be removed first.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final ok = await store.deleteCustomer(customer.id);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not delete party');
+      return;
+    }
+    if (selectedCustomerId == customer.id) {
+      setState(() {
+        selectedCustomerId = null;
+        partySearch.clear();
+      });
+    }
+    showAppSnackBar(context, 'Party deleted', backgroundColor: AppColors.success);
+  }
+
+  Future<void> _showEditVehicleDialog(GarageStore store, Vehicle vehicle) async {
+    final editReg = TextEditingController(text: vehicle.regNumber);
+    final editBrand = TextEditingController(text: vehicle.brand);
+    final editModel = TextEditingController(text: vehicle.model);
+    final editYear = TextEditingController(text: vehicle.year.toString());
+    final editKm = TextEditingController(text: vehicle.lastKmReading.toString());
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit Vehicle'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppTextField(
+                controller: editReg,
+                label: 'Vehicle Number *',
+                expand: true,
+                textCapitalization: TextCapitalization.characters,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(controller: editBrand, label: 'Brand *', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(controller: editModel, label: 'Model *', expand: true),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editYear,
+                label: 'Year *',
+                expand: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: editKm,
+                label: 'Last KM Reading',
+                expand: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true) {
+      _disposeAfterFrame([editReg, editBrand, editModel, editYear, editKm]);
+      return;
+    }
+
+    final regError = FormValidators.vehicleNumber(editReg.text);
+    final brandError = FormValidators.requiredText(editBrand.text, 'Brand');
+    final modelError = FormValidators.requiredText(editModel.text, 'Model');
+    final yearError = FormValidators.vehicleYear(editYear.text);
+    final kmValue = int.tryParse(editKm.text.trim());
+    final error = regError ??
+        brandError ??
+        modelError ??
+        yearError ??
+        (kmValue == null || kmValue < 0 ? 'Enter a valid KM reading' : null);
+
+    final updated = vehicle.copyWith(
+      regNumber: editReg.text.trim().toUpperCase(),
+      brand: editBrand.text.trim(),
+      model: editModel.text.trim(),
+      year: int.tryParse(editYear.text.trim()),
+      lastKmReading: kmValue,
+    );
+    _disposeAfterFrame([editReg, editBrand, editModel, editYear, editKm]);
+
+    if (error != null) {
+      if (mounted) {
+        showAppSnackBar(context, error);
+      }
+      return;
+    }
+
+    final ok = await store.updateVehicle(updated);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not update vehicle');
+      return;
+    }
+    showAppSnackBar(context, 'Vehicle updated', backgroundColor: AppColors.success);
+  }
+
+  Future<void> _confirmDeleteVehicle(GarageStore store, Vehicle vehicle) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete vehicle?'),
+        content: Text(
+          'Remove "${vehicle.regNumber}" permanently? Past job cards and '
+          'invoices for this vehicle will keep their records but show '
+          '"Unknown vehicle".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final ok = await store.deleteVehicle(vehicle.id);
+    if (!mounted) return;
+    if (!ok) {
+      showAppSnackBar(context, store.lastError ?? 'Could not delete vehicle');
+      return;
+    }
+    showAppSnackBar(context, 'Vehicle deleted', backgroundColor: AppColors.success);
   }
 
   @override
@@ -1012,9 +1288,29 @@ class _PartiesPageState extends State<PartiesPage> {
                     margin: const EdgeInsets.only(bottom: 10),
                     child: ExpansionTile(
                       tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-                      title: Text(
-                        customer.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              customer.name,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Edit party',
+                            onPressed: () => _showEditCustomerDialog(store, customer),
+                            icon: const Icon(Icons.edit_outlined, size: 20),
+                          ),
+                          IconButton(
+                            tooltip: 'Delete party',
+                            onPressed: () => _confirmDeleteCustomer(store, customer),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 20,
+                              color: AppColors.warning,
+                            ),
+                          ),
+                        ],
                       ),
                       subtitle: Text(customer.mobile),
                       children: vehicles
@@ -1026,9 +1322,28 @@ class _PartiesPageState extends State<PartiesPage> {
                               ),
                               title: Text(vehicle.regNumber),
                               subtitle: Text('${vehicle.brand} ${vehicle.model}'),
-                              trailing: Chip(
-                                label: Text('KM ${vehicle.lastKmReading}'),
-                                visualDensity: VisualDensity.compact,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Chip(
+                                    label: Text('KM ${vehicle.lastKmReading}'),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Edit vehicle',
+                                    onPressed: () => _showEditVehicleDialog(store, vehicle),
+                                    icon: const Icon(Icons.edit_outlined, size: 20),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Delete vehicle',
+                                    onPressed: () => _confirmDeleteVehicle(store, vehicle),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 20,
+                                      color: AppColors.warning,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           )
@@ -2389,7 +2704,11 @@ class _InvoicesPageState extends State<InvoicesPage> {
 }
 
 class EstimatesPage extends StatefulWidget {
-  const EstimatesPage({super.key});
+  const EstimatesPage({super.key, this.onInvoiceCreated});
+
+  /// Called after "Convert to Invoice" succeeds, so the shell can switch the
+  /// user straight to the Invoices tab instead of leaving them here.
+  final VoidCallback? onInvoiceCreated;
 
   @override
   State<EstimatesPage> createState() => _EstimatesPageState();
@@ -2493,9 +2812,10 @@ class _EstimatesPageState extends State<EstimatesPage> {
     }
     showAppSnackBar(
       context,
-      'Invoice created — check Invoices tab',
+      'Invoice created',
       backgroundColor: AppColors.success,
     );
+    widget.onInvoiceCreated?.call();
   }
 
   @override
@@ -2676,7 +2996,6 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController startInvoiceNumber;
   late final TextEditingController startJobCardNumber;
   late final TextEditingController startEstimateNumber;
-  String selectedRole = UserRole.admin.name;
 
   @override
   void initState() {
@@ -2693,7 +3012,6 @@ class _SettingsPageState extends State<SettingsPage> {
         TextEditingController(text: settings.nextJobCardNumber.toString());
     startEstimateNumber =
         TextEditingController(text: settings.nextEstimateNumber.toString());
-    selectedRole = context.read<GarageStore>().activeRole.name;
   }
 
   Future<void> _confirmAndClearBrowserCache() async {
@@ -2754,7 +3072,7 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           const PageHeader(
             title: 'Settings',
-            subtitle: 'Garage profile, numbering, and user roles',
+            subtitle: 'Garage profile and document numbering',
             icon: Icons.settings_rounded,
           ),
           SectionCard(
@@ -2772,24 +3090,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppTextField(controller: startInvoiceNumber, label: 'Next invoice number'),
                   AppTextField(controller: startJobCardNumber, label: 'Next job card number'),
                   AppTextField(controller: startEstimateNumber, label: 'Next estimate number'),
-                  DropdownMenu<String>(
-                    initialSelection: selectedRole,
-                    label: const Text('Current user role'),
-                    dropdownMenuEntries: UserRole.values
-                        .map(
-                          (role) => DropdownMenuEntry(
-                            value: role.name,
-                            label: role.label,
-                          ),
-                        )
-                        .toList(),
-                    onSelected: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      selectedRole = value;
-                    },
-                  ),
                   FilledButton(
                     onPressed: () async {
                       await store.updateSettings(
@@ -2807,11 +3107,6 @@ class _SettingsPageState extends State<SettingsPage> {
                         nextEstimateNumber:
                             int.tryParse(startEstimateNumber.text.trim()) ??
                                 store.settings.nextEstimateNumber,
-                      );
-                      store.setActiveRole(
-                        UserRole.values.firstWhere(
-                          (role) => role.name == selectedRole,
-                        ),
                       );
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -2849,23 +3144,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: const Text('Clear Browser Cache & Reload'),
                 ),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          SectionCard(
-            title: 'Role Permissions',
-            icon: Icons.admin_panel_settings_rounded,
-            child: Column(
-              children: UserRole.values.map(
-                (role) => DataListTile(
-                  title: role.label,
-                  subtitle: store.roleDescription(role),
-                  leading: CircleAvatar(
-                    backgroundColor: AppColors.primary.withValues(alpha: 0.1),
-                    child: const Icon(Icons.badge_outlined, color: AppColors.primary, size: 20),
-                  ),
-                ),
-              ).toList(),
             ),
           ),
         ],

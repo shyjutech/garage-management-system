@@ -232,11 +232,51 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
     await _maybeSyncStockPrice(context.read<GarageStore>(), stockItemId, price);
   }
 
+  /// Qty already queued for [stockItemId] across existing part lines, so
+  /// adding more of the same part checks against total demand, not just the
+  /// new line.
+  int _queuedQtyFor(String stockItemId) {
+    return partLines
+        .where((line) => line.stockItemId == stockItemId)
+        .fold<int>(0, (sum, line) => sum + line.qty);
+  }
+
+  /// Returns an error message if [stockItemId] doesn't have [qty] left in
+  /// stock (after accounting for what's already queued in this estimate), or
+  /// null if the quantity is available. Pass [replacingQty] when [qty] is
+  /// replacing (not adding to) an existing line's quantity, so that line's
+  /// own current qty isn't double-counted against itself.
+  String? _stockShortfallError(
+    GarageStore store,
+    String stockItemId,
+    int qty, {
+    int replacingQty = 0,
+  }) {
+    final stock =
+        store.stockItems.where((item) => item.id == stockItemId).firstOrNull;
+    if (stock == null) {
+      return 'That part is no longer in the stock catalog';
+    }
+    final remaining =
+        stock.currentStock - _queuedQtyFor(stockItemId) + replacingQty;
+    if (qty > remaining) {
+      return remaining <= 0
+          ? '${stock.name} is out of stock'
+          : 'Only $remaining ${stock.name} left in stock';
+    }
+    return null;
+  }
+
   Future<void> _addPart(GarageStore store) async {
     final stockItemId = partStockItemId;
     final qty = int.tryParse(partQty.text.trim()) ?? 0;
     final price = _draftPartPrice();
     if (stockItemId == null || qty <= 0 || price == null || price < 0) {
+      return;
+    }
+    final stockError = _stockShortfallError(store, stockItemId, qty);
+    if (stockError != null) {
+      showAppSnackBar(context, stockError);
       return;
     }
     setState(() => _flushDraftLines(store));
@@ -458,7 +498,9 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
                     children: [
                       PartSearchField(
                         controller: partSearch,
-                        items: store.stockItems,
+                        items: store.stockItems
+                            .where((item) => item.currentStock > 0)
+                            .toList(),
                         onSelected: (item) {
                           setState(() {
                             partStockItemId = item.id;
@@ -586,8 +628,18 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
                                         if (qty == null || qty <= 0) {
                                           return;
                                         }
-                                        final index = entry.key;
                                         final line = entry.value;
+                                        final stockError = _stockShortfallError(
+                                          store,
+                                          line.stockItemId,
+                                          qty,
+                                          replacingQty: line.qty,
+                                        );
+                                        if (stockError != null) {
+                                          showAppSnackBar(context, stockError);
+                                          return;
+                                        }
+                                        final index = entry.key;
                                         setState(() {
                                           partLines[index] = PartLineDraft(
                                             stockItemId: line.stockItemId,

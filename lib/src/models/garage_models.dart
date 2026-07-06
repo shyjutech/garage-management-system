@@ -14,6 +14,19 @@ class Customer {
   final String mobile;
   final String address;
 
+  Customer copyWith({
+    String? name,
+    String? mobile,
+    String? address,
+  }) {
+    return Customer(
+      id: id,
+      name: name ?? this.name,
+      mobile: mobile ?? this.mobile,
+      address: address ?? this.address,
+    );
+  }
+
   factory Customer.fromMap(String id, Map<String, dynamic> data) {
     return Customer(
       id: id,
@@ -51,6 +64,28 @@ class Vehicle {
   final int year;
   final int lastKmReading;
 
+  Vehicle copyWith({
+    String? regNumber,
+    String? brand,
+    String? model,
+    int? year,
+    int? lastKmReading,
+  }) {
+    final updatedRegNumber = regNumber ?? this.regNumber;
+    return Vehicle(
+      id: id,
+      customerId: customerId,
+      regNumber: updatedRegNumber,
+      regNumberNormalized: regNumber == null
+          ? regNumberNormalized
+          : normalizeRegNumber(updatedRegNumber),
+      brand: brand ?? this.brand,
+      model: model ?? this.model,
+      year: year ?? this.year,
+      lastKmReading: lastKmReading ?? this.lastKmReading,
+    );
+  }
+
   factory Vehicle.fromMap(String id, Map<String, dynamic> data) {
     return Vehicle(
       id: id,
@@ -73,6 +108,17 @@ class Vehicle {
         'year': year,
         'lastKmReading': lastKmReading,
         'createdAt': FieldValue.serverTimestamp(),
+      };
+
+  /// Fields editable after creation. Excludes `customerId` (ownership isn't
+  /// reassigned via edit) and `createdAt` (must not be reset by an update).
+  Map<String, dynamic> toUpdateMap() => {
+        'regNumber': regNumber,
+        'regNumberNormalized': regNumberNormalized,
+        'brand': brand,
+        'model': model,
+        'year': year,
+        'lastKmReading': lastKmReading,
       };
 }
 
@@ -842,6 +888,35 @@ class PaymentRecord {
       createdAt: createdAt,
     );
   }
+}
+
+class Expense {
+  const Expense({
+    required this.id,
+    required this.description,
+    required this.amount,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String description;
+  final double amount;
+  final DateTime createdAt;
+
+  factory Expense.fromMap(String id, Map<String, dynamic> data) {
+    return Expense(
+      id: id,
+      description: data['description'] as String? ?? '',
+      amount: (data['amount'] as num?)?.toDouble() ?? 0,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'description': description,
+        'amount': amount,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
 }
 
 List<InvoiceLineDraft> _parseLabourItems(Object? raw) {

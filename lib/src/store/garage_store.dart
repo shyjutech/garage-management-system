@@ -28,6 +28,7 @@ class GarageStore extends ChangeNotifier {
   final invoices = <Invoice>[];
   final stockTransactions = <StockTransaction>[];
   final payments = <PaymentRecord>[];
+  final expenses = <Expense>[];
 
   GarageSettings settings;
   UserRole activeRole = UserRole.admin;
@@ -55,6 +56,7 @@ class GarageStore extends ChangeNotifier {
   int _stockCounter = 1;
   int _labourCounter = 1;
   int _paymentCounter = 1;
+  int _expenseCounter = 1;
 
   Future<void> initialize() async {
     final repo = _repo;
@@ -160,6 +162,15 @@ class GarageStore extends ChangeNotifier {
             return;
           }
           payments
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchExpenses().listen((value) {
+          if (_disposed) {
+            return;
+          }
+          expenses
             ..clear()
             ..addAll(value);
           notifyListeners();
@@ -302,6 +313,87 @@ class GarageStore extends ChangeNotifier {
     }
   }
 
+  Future<bool> updateCustomer(Customer customer, {bool notify = true}) async {
+    final mobileError = _validateMobileForUpdate(customer);
+    if (mobileError != null) {
+      lastError = mobileError;
+      if (notify) {
+        notifyListeners();
+      }
+      return false;
+    }
+
+    if (_repo != null) {
+      try {
+        await _repo.updateCustomer(customer);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = customers.indexWhere((item) => item.id == customer.id);
+    if (index == -1) {
+      return false;
+    }
+    customers[index] = customer;
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  String? _validateMobileForUpdate(Customer customer) {
+    final normalized = normalizeMobile(customer.mobile);
+    final clash = customers
+        .where((item) =>
+            item.id != customer.id && normalizeMobile(item.mobile) == normalized)
+        .firstOrNull;
+    if (clash != null) {
+      return 'Another party already uses this mobile number: ${clash.name}';
+    }
+    return null;
+  }
+
+  Future<bool> deleteCustomer(String id, {bool notify = true}) async {
+    final hasVehicles = vehicles.any((vehicle) => vehicle.customerId == id);
+    if (hasVehicles) {
+      lastError =
+          'Remove or reassign this party\'s vehicles before deleting them.';
+      if (notify) {
+        notifyListeners();
+      }
+      return false;
+    }
+
+    if (_repo != null) {
+      try {
+        await _repo.deleteCustomer(id);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = customers.indexWhere((item) => item.id == id);
+    if (index == -1) {
+      return false;
+    }
+    customers.removeAt(index);
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
   Customer? customerByMobile(String mobile) {
     final normalized = normalizeMobile(mobile);
     if (normalized.isEmpty) {
@@ -390,6 +482,56 @@ class GarageStore extends ChangeNotifier {
       notifyListeners();
     }
     return vehicle;
+  }
+
+  Future<bool> updateVehicle(Vehicle vehicle, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateVehicle(vehicle);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = vehicles.indexWhere((item) => item.id == vehicle.id);
+    if (index == -1) {
+      return false;
+    }
+    vehicles[index] = vehicle;
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Future<bool> deleteVehicle(String id, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.deleteVehicle(id);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = vehicles.indexWhere((item) => item.id == id);
+    if (index == -1) {
+      return false;
+    }
+    vehicles.removeAt(index);
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
   }
 
   Future<StockItem?> addStockItem({
@@ -1227,6 +1369,43 @@ class GarageStore extends ChangeNotifier {
     return null;
   }
 
+  Future<String?> addExpense({
+    required String description,
+    required double amount,
+  }) async {
+    if (description.trim().isEmpty) {
+      lastError = 'Enter a description';
+      return lastError;
+    }
+    if (amount <= 0) {
+      lastError = 'Enter a valid amount';
+      return lastError;
+    }
+
+    if (_repo != null) {
+      final error = await _repo.addExpense(
+        description: description.trim(),
+        amount: amount,
+      );
+      if (error != null) {
+        lastError = error;
+      }
+      return error;
+    }
+
+    expenses.insert(
+      0,
+      Expense(
+        id: 'EX${_expenseCounter++}',
+        description: description.trim(),
+        amount: amount,
+        createdAt: DateTime.now(),
+      ),
+    );
+    notifyListeners();
+    return null;
+  }
+
   Future<String?> applyAdvanceToInvoice({
     required String paymentId,
     required String invoiceId,
@@ -1567,21 +1746,6 @@ class GarageStore extends ChangeNotifier {
 
     settings = updated;
     notifyListeners();
-  }
-
-  void setActiveRole(UserRole role) {
-    activeRole = role;
-    notifyListeners();
-  }
-
-  String roleDescription(UserRole role) {
-    return switch (role) {
-      UserRole.admin => 'Full access to all modules and settings.',
-      UserRole.billing =>
-        'Can manage party, vehicles, estimates, invoices, and payments.',
-      UserRole.mechanic => 'Can update job card status and notes.',
-      UserRole.accountant => 'Can view dashboard, invoices, and totals.',
-    };
   }
 
   Vehicle? findVehicleByRegNumber(String query) {
