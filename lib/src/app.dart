@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:garage_management_system/src/pages/estimate_editor_page.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/pages/job_cards_page.dart';
 import 'package:garage_management_system/src/pages/parties_list_page.dart';
@@ -11,7 +12,6 @@ import 'package:garage_management_system/src/utils/browser_cache_clearer.dart';
 import 'package:garage_management_system/src/utils/estimate_pdf.dart';
 import 'package:garage_management_system/src/utils/garage_utils.dart';
 import 'package:garage_management_system/src/utils/invoice_pdf.dart';
-import 'package:garage_management_system/src/widgets/estimate_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/invoice_editor_dialog.dart';
 import 'package:garage_management_system/src/widgets/ui_components.dart';
 import 'package:garage_management_system/src/widgets/responsive.dart';
@@ -2442,7 +2442,7 @@ class _EstimatesPageState extends State<EstimatesPage> {
       showAppSnackBar(context, 'Job card not found');
       return;
     }
-    final saved = await EstimateEditorDialog.show(
+    final saved = await EstimateEditorPage.show(
       context,
       jobCard: jobCard,
       existingEstimate: estimate,

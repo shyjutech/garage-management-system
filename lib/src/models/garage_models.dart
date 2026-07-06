@@ -212,6 +212,8 @@ class JobCard {
     this.remarks = '',
     required this.mechanicName,
     required this.estimatedDelivery,
+    this.labourEstimated = 0,
+    this.partsEstimated = 0,
     required this.status,
     required this.createdAt,
   });
@@ -231,10 +233,14 @@ class JobCard {
   final String remarks;
   final String mechanicName;
   final DateTime? estimatedDelivery;
+  final double labourEstimated;
+  final double partsEstimated;
   final JobStatus status;
   final DateTime createdAt;
 
   String get complaint => customerComplaints;
+
+  double get totalEstimate => labourEstimated + partsEstimated;
 
   JobCard copyWith({
     String? id,
@@ -252,6 +258,8 @@ class JobCard {
     String? remarks,
     String? mechanicName,
     DateTime? estimatedDelivery,
+    double? labourEstimated,
+    double? partsEstimated,
     JobStatus? status,
     DateTime? createdAt,
   }) {
@@ -271,6 +279,8 @@ class JobCard {
       remarks: remarks ?? this.remarks,
       mechanicName: mechanicName ?? this.mechanicName,
       estimatedDelivery: estimatedDelivery ?? this.estimatedDelivery,
+      labourEstimated: labourEstimated ?? this.labourEstimated,
+      partsEstimated: partsEstimated ?? this.partsEstimated,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -298,6 +308,8 @@ class JobCard {
           : delivery is DateTime
               ? delivery
               : null,
+      labourEstimated: (data['labourEstimated'] as num?)?.toDouble() ?? 0,
+      partsEstimated: (data['partsEstimated'] as num?)?.toDouble() ?? 0,
       status: jobStatusFromFirestore(data['status'] as String?),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -320,6 +332,8 @@ class JobCard {
         'estimatedDelivery': estimatedDelivery == null
             ? null
             : Timestamp.fromDate(estimatedDelivery!),
+        'labourEstimated': labourEstimated,
+        'partsEstimated': partsEstimated,
         'status': status.firestoreValue,
         'createdAt': FieldValue.serverTimestamp(),
       };
@@ -689,18 +703,28 @@ class InvoiceLineDraft {
 }
 
 class PartLineDraft {
-  const PartLineDraft({required this.stockItemId, required this.qty});
+  const PartLineDraft({
+    required this.stockItemId,
+    required this.qty,
+    this.unitPriceOverride,
+  });
 
   final String stockItemId;
   final int qty;
+  // Manually edited unit price; falls back to the stock item's selling price when null.
+  final double? unitPriceOverride;
 
-  double amountFor(Iterable<StockItem> stockItems) {
+  double unitPriceFor(Iterable<StockItem> stockItems) {
+    if (unitPriceOverride != null) {
+      return unitPriceOverride!;
+    }
     final item =
         stockItems.where((stock) => stock.id == stockItemId).firstOrNull;
-    if (item == null) {
-      return 0;
-    }
-    return qty * item.sellingPrice;
+    return item?.sellingPrice ?? 0;
+  }
+
+  double amountFor(Iterable<StockItem> stockItems) {
+    return qty * unitPriceFor(stockItems);
   }
 }
 

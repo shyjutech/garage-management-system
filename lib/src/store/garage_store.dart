@@ -720,6 +720,31 @@ class GarageStore extends ChangeNotifier {
     }
   }
 
+  Future<bool> updateJobCard(JobCard jobCard, {bool notify = true}) async {
+    if (_repo != null) {
+      try {
+        await _repo.updateJobCard(jobCard);
+        return true;
+      } catch (error) {
+        lastError = error.toString();
+        if (notify) {
+          notifyListeners();
+        }
+        return false;
+      }
+    }
+
+    final index = jobCards.indexWhere((item) => item.id == jobCard.id);
+    if (index == -1) {
+      return false;
+    }
+    jobCards[index] = jobCard;
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
   /// Returns null when stock is OK, otherwise a short reason.
   String? validatePartsStock(List<PartLineDraft> partsItems) {
     if (partsItems.isEmpty) {
@@ -861,7 +886,7 @@ class GarageStore extends ChangeNotifier {
         stockItemId: stock.id,
         name: stock.name,
         qty: line.qty,
-        unitPrice: stock.sellingPrice,
+        unitPrice: line.unitPriceOverride ?? stock.sellingPrice,
       );
     }).toList();
   }

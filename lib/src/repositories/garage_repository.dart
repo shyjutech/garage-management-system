@@ -266,6 +266,26 @@ class GarageRepository {
     await _db.doc('jobcards/$id').update({'status': status.firestoreValue});
   }
 
+  Future<void> updateJobCard(JobCard jobCard) async {
+    await _db.doc('jobcards/${jobCard.id}').update({
+      'kmReading': jobCard.kmReading,
+      'fuelLevel': jobCard.fuelLevel,
+      'customerComplaints': jobCard.customerComplaints,
+      'complaintItems': jobCard.complaintItems,
+      'observations': jobCard.observations,
+      'requestedWorks': jobCard.requestedWorks,
+      'otherNotes': jobCard.otherNotes,
+      'internalNotes': jobCard.internalNotes,
+      'remarks': jobCard.remarks,
+      'mechanicName': jobCard.mechanicName,
+      'estimatedDelivery': jobCard.estimatedDelivery == null
+          ? null
+          : Timestamp.fromDate(jobCard.estimatedDelivery!),
+      'labourEstimated': jobCard.labourEstimated,
+      'partsEstimated': jobCard.partsEstimated,
+    });
+  }
+
   Stream<List<Estimate>> watchEstimates() {
     return _db
         .collection('estimates')
@@ -954,7 +974,7 @@ class GarageRepository {
         stockItemId: stock.id,
         name: stock.name,
         qty: line.qty,
-        unitPrice: stock.sellingPrice,
+        unitPrice: line.unitPriceOverride ?? stock.sellingPrice,
       );
     }).toList();
   }
