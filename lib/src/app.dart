@@ -1,12 +1,16 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/pages/estimate_editor_page.dart';
 import 'package:garage_management_system/src/pages/expenses_page.dart';
 import 'package:garage_management_system/src/pages/help_page.dart';
 import 'package:garage_management_system/src/pages/job_cards_page.dart';
+import 'package:garage_management_system/src/pages/monthly_summary_page.dart';
+import 'package:garage_management_system/src/pages/outstanding_balances_page.dart';
 import 'package:garage_management_system/src/pages/parties_list_page.dart';
 import 'package:garage_management_system/src/pages/record_advance_page.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
+import 'package:garage_management_system/src/services/firebase_bootstrap.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
 import 'package:garage_management_system/src/utils/browser_cache_clearer.dart';
@@ -21,8 +25,32 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Future<void> confirmLogout(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Log out?'),
+      content: const Text('You will need to sign in again to continue.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Log out'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) {
+    await FirebaseAuth.instance.signOut();
+  }
+}
+
 enum AppSection {
   dashboard,
+  monthlySummary,
   parties,
   history,
   stock,
@@ -32,6 +60,7 @@ enum AppSection {
   invoices,
   advances,
   expenses,
+  outstandingBalances,
   help,
   settings,
 }
@@ -51,6 +80,11 @@ class _HomeShellState extends State<HomeShell> {
 
   static const navItems = <(AppSection, IconData, String)>[
     (AppSection.dashboard, Icons.dashboard_rounded, 'Dashboard'),
+    (
+      AppSection.monthlySummary,
+      Icons.calendar_month_rounded,
+      'Monthly Summary',
+    ),
     (AppSection.parties, Icons.people_rounded, 'Party'),
     (AppSection.history, Icons.history_rounded, 'History'),
     (AppSection.stock, Icons.inventory_2_rounded, 'Stock'),
@@ -60,6 +94,11 @@ class _HomeShellState extends State<HomeShell> {
     (AppSection.invoices, Icons.receipt_long_rounded, 'Invoices'),
     (AppSection.advances, Icons.savings_outlined, 'Advance'),
     (AppSection.expenses, Icons.currency_rupee_rounded, 'Expenses'),
+    (
+      AppSection.outstandingBalances,
+      Icons.account_balance_wallet_rounded,
+      'Outstanding',
+    ),
     (AppSection.help, Icons.help_outline_rounded, 'Help'),
     (AppSection.settings, Icons.settings_rounded, 'Settings'),
   ];
@@ -84,6 +123,7 @@ class _HomeShellState extends State<HomeShell> {
       Navigator.of(context).pop();
     }
   }
+
 
   Widget _buildSidebarContent(
     GarageStore store, {
@@ -172,6 +212,15 @@ class _HomeShellState extends State<HomeShell> {
                 .toList(),
           ),
         ),
+        if (FirebaseBootstrap.isConfigured) ...[
+          const Divider(color: Colors.white24, height: 1, indent: 16, endIndent: 16),
+          SidebarNavItem(
+            icon: Icons.logout_rounded,
+            label: 'Log out',
+            selected: false,
+            onTap: () => confirmLogout(context),
+          ),
+        ],
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Text(
@@ -246,6 +295,7 @@ class _HomeShellState extends State<HomeShell> {
         onOpenEstimates: _goToEstimates,
         onOpenStock: _goToStock,
       ),
+      AppSection.monthlySummary: const MonthlySummaryPage(),
       AppSection.parties: const PartiesPage(),
       AppSection.history: const VehicleHistoryPage(),
       AppSection.stock: const StockPage(),
@@ -255,6 +305,7 @@ class _HomeShellState extends State<HomeShell> {
       AppSection.invoices: const InvoicesPage(),
       AppSection.advances: const RecordAdvancePage(),
       AppSection.expenses: const ExpensesPage(),
+      AppSection.outstandingBalances: const OutstandingBalancesPage(),
       AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
@@ -3163,6 +3214,19 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
+          if (FirebaseBootstrap.isConfigured) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'Account',
+              icon: Icons.account_circle_rounded,
+              subtitle: 'Signed in on this device',
+              child: OutlinedButton.icon(
+                onPressed: () => confirmLogout(context),
+                icon: const Icon(Icons.logout_rounded, size: 20),
+                label: const Text('Log out'),
+              ),
+            ),
+          ],
         ],
       ),
     );

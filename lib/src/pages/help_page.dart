@@ -62,8 +62,8 @@ class HelpPage extends StatelessWidget {
                   number: '5',
                   title: 'ജോലി പൂർത്തിയാക്കുക',
                   body:
-                      'ജോബ് കാർഡുകളിൽ **Mark Work Done** അമർത്തുക, '
-                      'അല്ലെങ്കിൽ എസ്റ്റിമേറ്റ് പേജിൽ **Mark Job Done**.',
+                      'ജോബ് കാർഡുകളിൽ **Mark Work Done** അമർത്തുക (ഐച്ഛികം) — '
+                      'ഇത് ചെയ്യാതെയും നേരിട്ട് അടുത്ത ഘട്ടത്തിലേക്ക് പോകാം.',
                   menu: 'Job Cards',
                 ),
                 _flowArrow(),
@@ -208,7 +208,6 @@ class HelpPage extends StatelessWidget {
                 ),
                 _HelpBullet('**Edit** — ലേബർ/പാർട്സ് മാറ്റുക'),
                 _HelpBullet('**Print** — PDF പ്രിന്റ് / ഷെയർ'),
-                _HelpBullet('**Mark Job Done** — ജോലി പൂർത്തിയായി എന്ന് അടയാളപ്പെടുത്തുക'),
                 _HelpBullet('**Convert to Invoice** — ഉപഭോക്താവ് സമ്മതിച്ചാൽ ഇൻവോയ്സാക്കുക'),
                 _HelpTip(
                   'ഇൻവോയ്സ് നേരിട്ട് ഇൻവോയ്സ് പേജിൽ സൃഷ്ടിക്കാനാവില്ല — എസ്റ്റിമേറ്റിൽ നിന്ന് Convert ചെയ്യുക.',
@@ -319,7 +318,8 @@ class HelpPage extends StatelessWidget {
                   'വലിയ ജോലിക്ക് മുമ്പ് എസ്റ്റിമേറ്റ് പ്രിന്റ് ചെയ്ത് ഉപഭോക്താവിന് കാണിക്കുക.',
                 ),
                 _HelpTip(
-                  'ജോലി പൂർത്തിയായാൽ Mark Work Done → പിന്നീട് Convert to Invoice.',
+                  'Convert to Invoice നേരിട്ട് ചെയ്യാം — Mark Work Done ഐച്ഛികമാണ്, '
+                  'ജോബ് കാർഡ് ബോർഡിൽ സ്റ്റാറ്റസ് കാണിക്കാൻ മാത്രം.',
                 ),
                 _HelpTip(
                   'ലോഗിൻ ചെയ്ത ശേഷം ഡാറ്റ ഓൺലൈനിൽ സേവ് ആകും — റിഫ്രഷ് ചെയ്താലും നഷ്ടപ്പെടില്ല.',
