@@ -2281,6 +2281,7 @@ class InvoicesPage extends StatefulWidget {
 
 class _InvoicesPageState extends State<InvoicesPage> {
   final search = TextEditingController();
+  PaymentStatus? statusFilter;
 
   @override
   void dispose() {
@@ -2290,8 +2291,13 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
   List<Invoice> _filteredInvoices(GarageStore store) {
     final query = search.text.trim().toLowerCase();
-    final invoices = List<Invoice>.from(store.invoices)
+    var invoices = List<Invoice>.from(store.invoices)
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final filter = statusFilter;
+    if (filter != null) {
+      invoices = invoices.where((invoice) => invoice.paymentStatus == filter).toList();
+    }
 
     if (query.isEmpty) {
       return invoices;
@@ -2521,12 +2527,29 @@ class _InvoicesPageState extends State<InvoicesPage> {
     );
   }
 
+  Widget _statusFilterChip({
+    required String label,
+    required PaymentStatus? value,
+  }) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: statusFilter == value,
+      onSelected: (_) => setState(() => statusFilter = value),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<GarageStore>();
     final invoices = _filteredInvoices(store);
-    final unpaidCount = invoices
-        .where((invoice) => invoice.paymentStatus != PaymentStatus.paid)
+    final unpaidCount = store.invoices
+        .where((invoice) => invoice.paymentStatus == PaymentStatus.unpaid)
+        .length;
+    final partialCount = store.invoices
+        .where((invoice) => invoice.paymentStatus == PaymentStatus.partial)
+        .length;
+    final paidCount = store.invoices
+        .where((invoice) => invoice.paymentStatus == PaymentStatus.paid)
         .length;
 
     return SingleChildScrollView(
@@ -2541,9 +2564,9 @@ class _InvoicesPageState extends State<InvoicesPage> {
           SectionCard(
             title: 'All Invoices',
             icon: Icons.history_rounded,
-            subtitle: unpaidCount > 0
-                ? '$unpaidCount awaiting payment'
-                : '${invoices.length} total',
+            subtitle: unpaidCount + partialCount > 0
+                ? '$unpaidCount unpaid · $partialCount partial'
+                : '${store.invoices.length} total',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -2552,6 +2575,29 @@ class _InvoicesPageState extends State<InvoicesPage> {
                   hint: 'Search vehicle, invoice #, customer, status…',
                   expand: true,
                   onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _statusFilterChip(
+                      label: 'All (${store.invoices.length})',
+                      value: null,
+                    ),
+                    _statusFilterChip(
+                      label: 'Unpaid ($unpaidCount)',
+                      value: PaymentStatus.unpaid,
+                    ),
+                    _statusFilterChip(
+                      label: 'Partial ($partialCount)',
+                      value: PaymentStatus.partial,
+                    ),
+                    _statusFilterChip(
+                      label: 'Paid ($paidCount)',
+                      value: PaymentStatus.paid,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 if (invoices.isEmpty)
@@ -2775,22 +2821,6 @@ class _EstimatesPageState extends State<EstimatesPage> {
     }
   }
 
-  Future<void> _markJobDone(GarageStore store, Estimate estimate) async {
-    final jobCardId = estimate.jobCardId;
-    if (jobCardId == null) {
-      return;
-    }
-    await store.updateJobCardStatus(jobCardId, JobStatus.completed);
-    if (!mounted) {
-      return;
-    }
-    showAppSnackBar(
-      context,
-      'Job marked as work done',
-      backgroundColor: AppColors.success,
-    );
-  }
-
   Future<void> _convertToInvoice(
     BuildContext context,
     GarageStore store,
@@ -2861,9 +2891,6 @@ class _EstimatesPageState extends State<EstimatesPage> {
                         : store.jobCards
                             .where((item) => item.id == estimate.jobCardId)
                             .firstOrNull;
-                    final jobDone =
-                        jobCard?.status == JobStatus.completed ||
-                            jobCard?.status == JobStatus.delivered;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
                       clipBehavior: Clip.antiAlias,
@@ -2946,16 +2973,6 @@ class _EstimatesPageState extends State<EstimatesPage> {
                                   ),
                                   label: const Text('Print'),
                                 ),
-                                if (estimate.jobCardId != null && !jobDone)
-                                  OutlinedButton.icon(
-                                    onPressed: () =>
-                                        _markJobDone(store, estimate),
-                                    icon: const Icon(
-                                      Icons.check_circle_outline_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Mark Job Done'),
-                                  ),
                                 FilledButton.icon(
                                   onPressed: () =>
                                       _convertToInvoice(context, store, estimate),
