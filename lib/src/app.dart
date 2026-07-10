@@ -1687,7 +1687,7 @@ class _VehicleHistoryPageState extends State<VehicleHistoryPage> {
               ...invoice.partsItems.map(
                 (line) => _historyLineItem(
                   title: line.name,
-                  subtitle: 'Qty ${line.qty} × ${formatAmount(line.unitPrice)}',
+                  subtitle: 'Qty ${formatQty(line.qty)} × ${formatAmount(line.unitPrice)}',
                   amount: formatAmount(line.amount),
                 ),
               ),
@@ -2060,9 +2060,9 @@ class _StockPageState extends State<StockPage> {
     final editName = TextEditingController(text: item.name);
     final editSku = TextEditingController(text: item.sku);
     final editPrice = TextEditingController(text: item.sellingPrice.toString());
-    final editStock = TextEditingController(text: item.currentStock.toString());
+    final editStock = TextEditingController(text: formatQty(item.currentStock));
     final editMinStock =
-        TextEditingController(text: item.minStockAlert.toString());
+        TextEditingController(text: formatQty(item.minStockAlert));
 
     final saved = await showDialog<bool>(
       context: context,
@@ -2087,16 +2087,14 @@ class _StockPageState extends State<StockPage> {
                 controller: editStock,
                 label: 'Current Stock *',
                 expand: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
               const SizedBox(height: 12),
               AppTextField(
                 controller: editMinStock,
                 label: 'Min Alert *',
                 expand: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
             ],
           ),
@@ -2125,8 +2123,8 @@ class _StockPageState extends State<StockPage> {
 
     final nameError = FormValidators.requiredText(editName.text, 'Item name');
     final priceValue = double.tryParse(editPrice.text.trim());
-    final stockValue = int.tryParse(editStock.text.trim());
-    final minValue = int.tryParse(editMinStock.text.trim());
+    final stockValue = double.tryParse(editStock.text.trim());
+    final minValue = double.tryParse(editMinStock.text.trim());
     final error = nameError ??
         (priceValue == null || priceValue < 0
             ? 'Selling price must be a valid number'
@@ -2238,9 +2236,21 @@ class _StockPageState extends State<StockPage> {
                 children: [
                   AppTextField(controller: name, label: 'Item Name'),
                   AppTextField(controller: sku, label: 'SKU'),
-                  AppTextField(controller: price, label: 'Selling Price'),
-                  AppTextField(controller: stock, label: 'Current Stock'),
-                  AppTextField(controller: minStock, label: 'Min Alert'),
+                  AppTextField(
+                    controller: price,
+                    label: 'Selling Price',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  AppTextField(
+                    controller: stock,
+                    label: 'Current Stock',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  AppTextField(
+                    controller: minStock,
+                    label: 'Min Alert',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
                   FilledButton(
                     onPressed: () async {
                       if (name.text.trim().isEmpty) {
@@ -2250,8 +2260,8 @@ class _StockPageState extends State<StockPage> {
                         name: name.text.trim(),
                         sku: sku.text.trim(),
                         price: double.tryParse(price.text.trim()) ?? 0,
-                        currentStock: int.tryParse(stock.text.trim()) ?? 0,
-                        minStockAlert: int.tryParse(minStock.text.trim()) ?? 0,
+                        currentStock: double.tryParse(stock.text.trim()) ?? 0,
+                        minStockAlert: double.tryParse(minStock.text.trim()) ?? 0,
                       );
                       name.clear();
                       sku.clear();
@@ -2274,7 +2284,8 @@ class _StockPageState extends State<StockPage> {
                   final low = item.currentStock <= item.minStockAlert;
                   return DataListTile(
                     title: '${item.name} (${item.sku})',
-                    subtitle: 'Stock: ${item.currentStock} · Min: ${item.minStockAlert}',
+                    subtitle:
+                        'Stock: ${formatQty(item.currentStock)} · Min: ${formatQty(item.minStockAlert)}',
                     leading: CircleAvatar(
                       backgroundColor: (low ? AppColors.warning : AppColors.success)
                           .withValues(alpha: 0.12),

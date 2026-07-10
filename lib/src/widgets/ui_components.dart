@@ -819,7 +819,7 @@ class _PartSearchFieldState extends State<PartSearchField> {
                     return ListTile(
                       dense: true,
                       title: Text(item.name),
-                      subtitle: Text('SKU ${item.sku} · Stock ${item.currentStock}'),
+                      subtitle: Text('SKU ${item.sku} · Stock ${formatQty(item.currentStock)}'),
                       trailing: Text(
                         formatAmount(item.sellingPrice),
                         style: const TextStyle(

@@ -161,8 +161,8 @@ class GarageRepository {
     required String name,
     required String sku,
     required double price,
-    required int currentStock,
-    required int minStockAlert,
+    required double currentStock,
+    required double minStockAlert,
   }) async {
     final ref = _db.collection('stock_items').doc();
     final item = StockItem(
@@ -850,12 +850,12 @@ class GarageRepository {
     required List<InvoicePartLine> newParts,
     required Map<String, DocumentSnapshot<Map<String, dynamic>>> stockSnaps,
   }) {
-    final oldTotals = <String, int>{};
+    final oldTotals = <String, double>{};
     for (final part in oldParts) {
       oldTotals[part.stockItemId] =
           (oldTotals[part.stockItemId] ?? 0) + part.qty;
     }
-    final newTotals = <String, int>{};
+    final newTotals = <String, double>{};
     for (final part in newParts) {
       newTotals[part.stockItemId] = (newTotals[part.stockItemId] ?? 0) + part.qty;
     }
@@ -877,7 +877,7 @@ class GarageRepository {
         continue;
       }
 
-      final current = (snap.data()!['currentStock'] as num?)?.toInt() ?? 0;
+      final current = (snap.data()!['currentStock'] as num?)?.toDouble() ?? 0;
       if (netChange > 0) {
         if (current < netChange) {
           final name = snap.data()!['name'] as String? ?? stockId;
@@ -917,7 +917,7 @@ class GarageRepository {
     required String invoiceId,
     required Map<String, DocumentSnapshot<Map<String, dynamic>>> stockSnaps,
   }) {
-    final totals = <String, int>{};
+    final totals = <String, double>{};
     final names = <String, String>{};
     for (final part in partsItems) {
       totals[part.stockItemId] = (totals[part.stockItemId] ?? 0) + part.qty;
@@ -930,7 +930,7 @@ class GarageRepository {
         throw _InvoiceException('Stock item ${entry.key} missing');
       }
       final current =
-          (snap.data()!['currentStock'] as num?)?.toInt() ?? 0;
+          (snap.data()!['currentStock'] as num?)?.toDouble() ?? 0;
       if (current < entry.value) {
         throw _InvoiceException(
           'Insufficient stock for ${names[entry.key] ?? entry.key}',

@@ -300,7 +300,7 @@ class SarathiPdf {
                 pw.Expanded(
                   flex: 2,
                   child: pw.Text(
-                    '${line.qty}',
+                    formatQty(line.qty),
                     style: value,
                     textAlign: pw.TextAlign.right,
                   ),

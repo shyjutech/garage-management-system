@@ -538,8 +538,8 @@ class GarageStore extends ChangeNotifier {
     required String name,
     required String sku,
     required double price,
-    required int currentStock,
-    required int minStockAlert,
+    required double currentStock,
+    required double minStockAlert,
     bool notify = true,
   }) async {
     if (_repo == null) {
@@ -573,8 +573,8 @@ class GarageStore extends ChangeNotifier {
     required String name,
     required String sku,
     required double price,
-    required int currentStock,
-    required int minStockAlert,
+    required double currentStock,
+    required double minStockAlert,
     bool notify = true,
   }) {
     final item = StockItem(
@@ -892,7 +892,7 @@ class GarageStore extends ChangeNotifier {
     if (partsItems.isEmpty) {
       return null;
     }
-    final totals = <String, int>{};
+    final totals = <String, double>{};
     for (final line in partsItems) {
       totals[line.stockItemId] = (totals[line.stockItemId] ?? 0) + line.qty;
     }
@@ -903,7 +903,8 @@ class GarageStore extends ChangeNotifier {
         return 'Part not found in stock list';
       }
       if (item.currentStock < entry.value) {
-        return '${item.name}: need ${entry.value}, only ${item.currentStock} in stock';
+        return '${item.name}: need ${formatQty(entry.value)}, only '
+            '${formatQty(item.currentStock)} in stock';
       }
     }
     return null;
@@ -1458,12 +1459,12 @@ class GarageStore extends ChangeNotifier {
     required List<PartLineDraft> newPartDrafts,
     required String invoiceId,
   }) {
-    final oldTotals = <String, int>{};
+    final oldTotals = <String, double>{};
     for (final part in oldParts) {
       oldTotals[part.stockItemId] =
           (oldTotals[part.stockItemId] ?? 0) + part.qty;
     }
-    final newTotals = <String, int>{};
+    final newTotals = <String, double>{};
     for (final draft in newPartDrafts) {
       newTotals[draft.stockItemId] =
           (newTotals[draft.stockItemId] ?? 0) + draft.qty;

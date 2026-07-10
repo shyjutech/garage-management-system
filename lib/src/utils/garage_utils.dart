@@ -24,6 +24,17 @@ String formatAmount(double value) {
       .format(value);
 }
 
+/// Formats a part/stock quantity, dropping the decimal point for whole
+/// numbers (e.g. "4" instead of "4.0") while still showing fractions like
+/// "4.5" for parts such as engine oil that are sold/used by volume.
+String formatQty(double value) {
+  if (value == value.roundToDouble()) {
+    return value.toStringAsFixed(0);
+  }
+  final text = value.toStringAsFixed(2);
+  return text.endsWith('0') ? text.substring(0, text.length - 1) : text;
+}
+
 bool sameDay(DateTime a, DateTime b) {
   return a.year == b.year && a.month == b.month && a.day == b.day;
 }

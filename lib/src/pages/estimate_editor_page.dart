@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/store/garage_store.dart';
 import 'package:garage_management_system/src/theme/app_theme.dart';
@@ -119,7 +118,7 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
     if (partStockItemId == null) {
       return 0;
     }
-    final qty = int.tryParse(partQty.text.trim()) ?? 0;
+    final qty = double.tryParse(partQty.text.trim()) ?? 0;
     final price = _draftPartPrice();
     if (qty <= 0 || price == null || price < 0) {
       return 0;
@@ -145,7 +144,7 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
     }
 
     if (partStockItemId != null) {
-      final qty = int.tryParse(partQty.text.trim()) ?? 0;
+      final qty = double.tryParse(partQty.text.trim()) ?? 0;
       final price = _draftPartPrice();
       if (qty > 0 && price != null && price >= 0) {
         final existingIndex =
@@ -235,10 +234,10 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
   /// Qty already queued for [stockItemId] across existing part lines, so
   /// adding more of the same part checks against total demand, not just the
   /// new line.
-  int _queuedQtyFor(String stockItemId) {
+  double _queuedQtyFor(String stockItemId) {
     return partLines
         .where((line) => line.stockItemId == stockItemId)
-        .fold<int>(0, (sum, line) => sum + line.qty);
+        .fold<double>(0, (sum, line) => sum + line.qty);
   }
 
   /// Returns an error message if [stockItemId] doesn't have [qty] left in
@@ -249,8 +248,8 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
   String? _stockShortfallError(
     GarageStore store,
     String stockItemId,
-    int qty, {
-    int replacingQty = 0,
+    double qty, {
+    double replacingQty = 0,
   }) {
     final stock =
         store.stockItems.where((item) => item.id == stockItemId).firstOrNull;
@@ -262,14 +261,14 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
     if (qty > remaining) {
       return remaining <= 0
           ? '${stock.name} is out of stock'
-          : 'Only $remaining ${stock.name} left in stock';
+          : 'Only ${formatQty(remaining)} ${stock.name} left in stock';
     }
     return null;
   }
 
   Future<void> _addPart(GarageStore store) async {
     final stockItemId = partStockItemId;
-    final qty = int.tryParse(partQty.text.trim()) ?? 0;
+    final qty = double.tryParse(partQty.text.trim()) ?? 0;
     final price = _draftPartPrice();
     if (stockItemId == null || qty <= 0 || price == null || price < 0) {
       return;
@@ -514,8 +513,7 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
                         controller: partQty,
                         label: 'Qty',
                         width: 100,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         onChanged: (_) => setState(() {}),
                       ),
                       AppTextField(
@@ -610,12 +608,11 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
                                     width: 56,
                                     child: TextFormField(
                                       key: ValueKey('part-qty-${entry.value.stockItemId}'),
-                                      initialValue: '${entry.value.qty}',
+                                      initialValue: formatQty(entry.value.qty),
                                       textAlign: TextAlign.center,
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
+                                      keyboardType: const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
                                       decoration: const InputDecoration(
                                         isDense: true,
                                         contentPadding: EdgeInsets.symmetric(
@@ -624,7 +621,7 @@ class _EstimateEditorPageState extends State<EstimateEditorPage> {
                                         ),
                                       ),
                                       onChanged: (value) {
-                                        final qty = int.tryParse(value.trim());
+                                        final qty = double.tryParse(value.trim());
                                         if (qty == null || qty <= 0) {
                                           return;
                                         }

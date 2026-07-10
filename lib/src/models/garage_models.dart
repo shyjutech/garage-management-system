@@ -136,16 +136,16 @@ class StockItem {
   final String name;
   final String sku;
   final double sellingPrice;
-  final int currentStock;
-  final int minStockAlert;
+  final double currentStock;
+  final double minStockAlert;
 
   StockItem copyWith({
     String? id,
     String? name,
     String? sku,
     double? sellingPrice,
-    int? currentStock,
-    int? minStockAlert,
+    double? currentStock,
+    double? minStockAlert,
   }) {
     return StockItem(
       id: id ?? this.id,
@@ -163,8 +163,8 @@ class StockItem {
       name: data['name'] as String? ?? '',
       sku: data['sku'] as String? ?? '',
       sellingPrice: (data['sellingPrice'] as num?)?.toDouble() ?? 0,
-      currentStock: (data['currentStock'] as num?)?.toInt() ?? 0,
-      minStockAlert: (data['minStockAlert'] as num?)?.toInt() ?? 0,
+      currentStock: (data['currentStock'] as num?)?.toDouble() ?? 0,
+      minStockAlert: (data['minStockAlert'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -756,7 +756,7 @@ class PartLineDraft {
   });
 
   final String stockItemId;
-  final int qty;
+  final double qty;
   // Manually edited unit price; falls back to the stock item's selling price when null.
   final double? unitPriceOverride;
 
@@ -784,7 +784,7 @@ class InvoicePartLine {
 
   final String stockItemId;
   final String name;
-  final int qty;
+  final double qty;
   final double unitPrice;
 
   double get amount => qty * unitPrice;
@@ -793,7 +793,7 @@ class InvoicePartLine {
     return InvoicePartLine(
       stockItemId: data['stockItemId'] as String? ?? '',
       name: data['name'] as String? ?? '',
-      qty: (data['qty'] as num?)?.toInt() ?? 0,
+      qty: (data['qty'] as num?)?.toDouble() ?? 0,
       unitPrice: (data['unitPrice'] as num?)?.toDouble() ?? 0,
     );
   }
@@ -821,7 +821,7 @@ class StockTransaction {
   final String id;
   final String stockItemId;
   final StockTransactionType type;
-  final int qty;
+  final double qty;
   final String referenceType;
   final String referenceId;
   final DateTime createdAt;
@@ -831,7 +831,7 @@ class StockTransaction {
       id: id,
       stockItemId: data['stockItemId'] as String? ?? '',
       type: stockTransactionTypeFromFirestore(data['type'] as String?),
-      qty: (data['qty'] as num?)?.toInt() ?? 0,
+      qty: (data['qty'] as num?)?.toDouble() ?? 0,
       referenceType: data['referenceType'] as String? ?? '',
       referenceId: data['referenceId'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),

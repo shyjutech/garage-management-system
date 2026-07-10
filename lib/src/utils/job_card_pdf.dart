@@ -261,7 +261,7 @@ class JobCardPdf {
               (line) => pw.Padding(
                 padding: const pw.EdgeInsets.only(bottom: 2),
                 child: pw.Text(
-                  '${line.name} × ${line.qty} @ ${formatAmount(line.unitPrice)}',
+                  '${line.name} × ${formatQty(line.qty)} @ ${formatAmount(line.unitPrice)}',
                   style: value,
                 ),
               ),
