@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:garage_management_system/firebase_options.dart';
 import 'package:garage_management_system/src/models/garage_models.dart';
 import 'package:garage_management_system/src/utils/garage_utils.dart';
 
@@ -51,6 +53,58 @@ class GarageRepository {
       return UserRole.admin;
     }
     return userRoleFromFirestore(snapshot.data()!['role'] as String?);
+  }
+
+  Stream<List<StaffAccount>> watchStaffAccounts() {
+    return _db.collection('users').snapshots().map(
+          (snapshot) => snapshot.docs
+              .map((doc) => StaffAccount.fromMap(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  /// Creates a staff login without disturbing the currently signed-in admin
+  /// session: the Auth account is created on a throwaway secondary Firebase
+  /// app instance (which is what would otherwise sign the admin out), then
+  /// the role doc is written from the admin's own session.
+  Future<String?> createStaffAccount({
+    required String name,
+    required String email,
+    required String password,
+    required UserRole role,
+  }) async {
+    FirebaseApp? secondaryApp;
+    try {
+      secondaryApp = await Firebase.initializeApp(
+        name: 'staff-creation-${DateTime.now().microsecondsSinceEpoch}',
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+      final credential = await secondaryAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final uid = credential.user!.uid;
+      await secondaryAuth.signOut();
+
+      await _db.doc('users/$uid').set({
+        'name': name,
+        'email': email,
+        'role': role.name,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      return null;
+    } on FirebaseAuthException catch (error) {
+      return error.message ?? 'Could not create staff account';
+    } catch (error) {
+      return error.toString();
+    } finally {
+      await secondaryApp?.delete();
+    }
+  }
+
+  Future<void> removeStaffAccess(String uid) async {
+    await _db.doc('users/$uid').delete();
   }
 
   Stream<List<Customer>> watchCustomers() {

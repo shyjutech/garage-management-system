@@ -439,6 +439,34 @@ UserRole userRoleFromFirestore(String? value) {
   );
 }
 
+/// A staff login — the Firebase Auth account lives separately; this is the
+/// `users/{uid}` Firestore doc that grants it a role.
+class StaffAccount {
+  const StaffAccount({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.createdAt,
+  });
+
+  final String id;
+  final String name;
+  final String email;
+  final UserRole role;
+  final DateTime? createdAt;
+
+  factory StaffAccount.fromMap(String id, Map<String, dynamic> data) {
+    return StaffAccount(
+      id: id,
+      name: data['name'] as String? ?? '',
+      email: data['email'] as String? ?? '',
+      role: userRoleFromFirestore(data['role'] as String?),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+    );
+  }
+}
+
 enum StockTransactionType { inType, out, adjust }
 
 StockTransactionType stockTransactionTypeFromFirestore(String? value) {

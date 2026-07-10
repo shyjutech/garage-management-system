@@ -29,6 +29,7 @@ class GarageStore extends ChangeNotifier {
   final stockTransactions = <StockTransaction>[];
   final payments = <PaymentRecord>[];
   final expenses = <Expense>[];
+  final staffAccounts = <StaffAccount>[];
 
   GarageSettings settings;
   UserRole activeRole = UserRole.admin;
@@ -171,6 +172,15 @@ class GarageStore extends ChangeNotifier {
             return;
           }
           expenses
+            ..clear()
+            ..addAll(value);
+          notifyListeners();
+        }))
+        ..add(repo.watchStaffAccounts().listen((value) {
+          if (_disposed) {
+            return;
+          }
+          staffAccounts
             ..clear()
             ..addAll(value);
           notifyListeners();
@@ -1405,6 +1415,54 @@ class GarageStore extends ChangeNotifier {
     );
     notifyListeners();
     return null;
+  }
+
+  Future<String?> createStaffAccount({
+    required String name,
+    required String email,
+    required String password,
+    required UserRole role,
+  }) async {
+    if (name.trim().isEmpty) {
+      lastError = 'Enter a name';
+      return lastError;
+    }
+    if (email.trim().isEmpty) {
+      lastError = 'Enter an email';
+      return lastError;
+    }
+    if (password.length < 6) {
+      lastError = 'Password must be at least 6 characters';
+      return lastError;
+    }
+    if (_repo == null) {
+      lastError = 'Staff accounts require Firebase to be configured';
+      return lastError;
+    }
+    final error = await _repo.createStaffAccount(
+      name: name.trim(),
+      email: email.trim(),
+      password: password,
+      role: role,
+    );
+    if (error != null) {
+      lastError = error;
+    }
+    return error;
+  }
+
+  Future<String?> removeStaffAccess(String uid) async {
+    if (_repo == null) {
+      lastError = 'Staff accounts require Firebase to be configured';
+      return lastError;
+    }
+    try {
+      await _repo.removeStaffAccess(uid);
+      return null;
+    } catch (error) {
+      lastError = error.toString();
+      return lastError;
+    }
   }
 
   Future<String?> applyAdvanceToInvoice({

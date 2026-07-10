@@ -124,11 +124,43 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Pages a role has any real use for. Read access is unrestricted for all
+  /// staff at the data layer (firestore.rules), but most roles only ever
+  /// need a slice of the app — this keeps the sidebar focused on that,
+  /// rather than exposing every page and letting write attempts fail later.
+  List<AppSection> _allowedSections(UserRole role) {
+    return switch (role) {
+      UserRole.admin => AppSection.values,
+      UserRole.billing => AppSection.values
+          .where((section) => section != AppSection.settings)
+          .toList(),
+      UserRole.mechanic => const [
+          AppSection.dashboard,
+          AppSection.jobCards,
+          AppSection.history,
+          AppSection.stock,
+          AppSection.help,
+        ],
+      UserRole.accountant => const [
+          AppSection.dashboard,
+          AppSection.monthlySummary,
+          AppSection.history,
+          AppSection.invoices,
+          AppSection.advances,
+          AppSection.expenses,
+          AppSection.outstandingBalances,
+          AppSection.help,
+        ],
+    };
+  }
 
   Widget _buildSidebarContent(
     GarageStore store, {
     required bool isDrawer,
   }) {
+    final allowedSections = _allowedSections(store.activeRole);
+    final visibleNavItems =
+        navItems.where((item) => allowedSections.contains(item.$1)).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -200,7 +232,7 @@ class _HomeShellState extends State<HomeShell> {
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            children: navItems
+            children: visibleNavItems
                 .map(
                   (item) => SidebarNavItem(
                     icon: item.$2,
@@ -309,6 +341,9 @@ class _HomeShellState extends State<HomeShell> {
       AppSection.help: const HelpPage(),
     };
     final store = context.watch<GarageStore>();
+    if (!_allowedSections(store.activeRole).contains(section)) {
+      section = AppSection.dashboard;
+    }
     final compact = AppBreakpoints.isCompact(context);
     final currentTitle = navItems.firstWhere((n) => n.$1 == section).$3;
 
@@ -685,17 +720,19 @@ class _DashboardPageState extends State<DashboardPage> {
             spacing: 14,
             runSpacing: 14,
             children: [
-              MetricCard(
-                label: 'Today Sales',
-                value: formatAmount(todaySales),
-                icon: Icons.payments_rounded,
-              ),
-              MetricCard(
-                label: 'Monthly Sales',
-                value: formatAmount(monthlySales),
-                icon: Icons.calendar_month_rounded,
-                accentColor: AppColors.primaryDark,
-              ),
+              if (store.activeRole == UserRole.admin) ...[
+                MetricCard(
+                  label: 'Today Sales',
+                  value: formatAmount(todaySales),
+                  icon: Icons.payments_rounded,
+                ),
+                MetricCard(
+                  label: 'Monthly Sales',
+                  value: formatAmount(monthlySales),
+                  icon: Icons.calendar_month_rounded,
+                  accentColor: AppColors.primaryDark,
+                ),
+              ],
               MetricCard(
                 label: 'Pending Payments',
                 value: formatAmount(pending),
@@ -725,16 +762,18 @@ class _DashboardPageState extends State<DashboardPage> {
                       : AppColors.warning,
                   onTap: widget.onOpenStock,
                 ),
-              MetricCard(
-                label: 'Labour Revenue',
-                value: formatAmount(labourRevenue),
-                icon: Icons.handyman_rounded,
-              ),
-              MetricCard(
-                label: 'Parts Revenue',
-                value: formatAmount(partsRevenue),
-                icon: Icons.precision_manufacturing_rounded,
-              ),
+              if (store.activeRole == UserRole.admin) ...[
+                MetricCard(
+                  label: 'Labour Revenue',
+                  value: formatAmount(labourRevenue),
+                  icon: Icons.handyman_rounded,
+                ),
+                MetricCard(
+                  label: 'Parts Revenue',
+                  value: formatAmount(partsRevenue),
+                  icon: Icons.precision_manufacturing_rounded,
+                ),
+              ],
               MetricCard(
                 label: 'Open Estimates',
                 value: '${store.openEstimates}',
@@ -3075,6 +3114,11 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController startInvoiceNumber;
   late final TextEditingController startJobCardNumber;
   late final TextEditingController startEstimateNumber;
+  final staffName = TextEditingController();
+  final staffEmail = TextEditingController();
+  final staffPassword = TextEditingController();
+  UserRole staffRole = UserRole.billing;
+  bool addingStaff = false;
 
   @override
   void initState() {
@@ -3091,6 +3135,90 @@ class _SettingsPageState extends State<SettingsPage> {
         TextEditingController(text: settings.nextJobCardNumber.toString());
     startEstimateNumber =
         TextEditingController(text: settings.nextEstimateNumber.toString());
+  }
+
+  @override
+  void dispose() {
+    businessName.dispose();
+    tagline.dispose();
+    address.dispose();
+    phone.dispose();
+    invoicePrefix.dispose();
+    startInvoiceNumber.dispose();
+    startJobCardNumber.dispose();
+    startEstimateNumber.dispose();
+    staffName.dispose();
+    staffEmail.dispose();
+    staffPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addStaffAccount(GarageStore store) async {
+    setState(() => addingStaff = true);
+    final error = await store.createStaffAccount(
+      name: staffName.text,
+      email: staffEmail.text,
+      password: staffPassword.text,
+      role: staffRole,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => addingStaff = false);
+
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    staffName.clear();
+    staffEmail.clear();
+    staffPassword.clear();
+    showAppSnackBar(
+      context,
+      'Staff account created',
+      backgroundColor: AppColors.success,
+    );
+  }
+
+  Future<void> _confirmRemoveStaff(GarageStore store, StaffAccount account) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove staff access?'),
+        content: Text(
+          '${account.name.isEmpty ? account.email : account.name} will no '
+          'longer be able to open any garage data. Their login itself isn\'t '
+          'deleted, only the access granted to it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Remove access'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    final error = await store.removeStaffAccess(account.id);
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      showAppSnackBar(context, error);
+      return;
+    }
+    showAppSnackBar(
+      context,
+      'Access removed',
+      backgroundColor: AppColors.success,
+    );
   }
 
   Future<void> _confirmAndClearBrowserCache() async {
@@ -3203,6 +3331,97 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
           ),
+          if (FirebaseBootstrap.isConfigured &&
+              store.activeRole == UserRole.admin) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'Staff Access',
+              icon: Icons.badge_outlined,
+              subtitle: '${store.staffAccounts.length} with a login',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.end,
+                    children: [
+                      AppTextField(controller: staffName, label: 'Name'),
+                      AppTextField(
+                        controller: staffEmail,
+                        label: 'Email',
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      AppTextField(
+                        controller: staffPassword,
+                        label: 'Temp Password',
+                      ),
+                      AppDropdownField<UserRole>(
+                        label: 'Role',
+                        value: staffRole,
+                        items: UserRole.values
+                            .map(
+                              (role) => DropdownMenuItem(
+                                value: role,
+                                child: Text(role.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => staffRole = value);
+                        },
+                      ),
+                      FilledButton.icon(
+                        onPressed:
+                            addingStaff ? null : () => _addStaffAccount(store),
+                        icon: addingStaff
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                        label: const Text('Add Staff'),
+                      ),
+                    ],
+                  ),
+                  if (store.staffAccounts.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    ...store.staffAccounts.map((account) {
+                      final isSelf =
+                          account.id == FirebaseAuth.instance.currentUser?.uid;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          account.name.isEmpty ? account.email : account.name,
+                        ),
+                        subtitle: Text(
+                          isSelf ? '${account.email} · You' : account.email,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Chip(label: Text(account.role.label)),
+                            if (!isSelf)
+                              IconButton(
+                                tooltip: 'Remove access',
+                                onPressed: () =>
+                                    _confirmRemoveStaff(store, account),
+                                icon: const Icon(
+                                  Icons.person_remove_outlined,
+                                  color: AppColors.warning,
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           SectionCard(
             title: 'Browser Cache',
